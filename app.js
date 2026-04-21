@@ -503,13 +503,9 @@
       }
     });
 
-    const cameraInputs = node.querySelectorAll(".file-input-camera, .file-input-camera-tile");
-    cameraInputs.forEach((input) => {
-      input.addEventListener("change", async (e) => {
-        const files = Array.from(e.target.files || []);
-        input.value = "";
-        if (files.length) await addPhotos(group, files);
-      });
+    const takeButtons = node.querySelectorAll(".btn-take-photo, .btn-take-photo-tile");
+    takeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => openCamera(group));
     });
 
     node.querySelector(".btn-remove-group").addEventListener("click", () => removeGroup(group.id));
@@ -650,6 +646,198 @@
     els.exportBtn.disabled = disabled;
     els.exportZipBtn.disabled = disabled;
   }
+
+  // -------------------- In-app camera --------------------
+  const camera = {
+    stream: null,
+    facingMode: "environment",
+    group: null,
+    buffer: [],
+    els: {
+      overlay: document.getElementById("camera-overlay"),
+      video: document.getElementById("camera-video"),
+      flash: document.getElementById("camera-flash"),
+      title: document.getElementById("camera-title"),
+      count: document.getElementById("camera-count"),
+      thumbs: document.getElementById("camera-thumbs"),
+      shutter: document.getElementById("camera-shutter"),
+      done: document.getElementById("camera-done"),
+      cancel: document.getElementById("camera-cancel"),
+      switch: document.getElementById("camera-switch"),
+    },
+  };
+
+  async function openCamera(group) {
+    camera.group = group;
+    camera.buffer = [];
+    camera.els.title.textContent = group.name;
+    updateCameraCount();
+    renderCameraBuffer();
+    camera.els.overlay.hidden = false;
+    camera.els.overlay.setAttribute("aria-hidden", "false");
+    try {
+      await startCameraStream(camera.facingMode);
+    } catch (err) {
+      console.warn("getUserMedia failed", err);
+      camera.els.overlay.hidden = true;
+      camera.els.overlay.setAttribute("aria-hidden", "true");
+      toast("Can't open the in-app camera — check camera permission.", "err");
+      return;
+    }
+  }
+
+  async function startCameraStream(facingMode) {
+    if (camera.stream) {
+      camera.stream.getTracks().forEach((t) => t.stop());
+      camera.stream = null;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("Camera API not available");
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+    camera.stream = stream;
+    camera.facingMode = facingMode;
+    camera.els.video.srcObject = stream;
+    try {
+      await camera.els.video.play();
+    } catch (_) {
+      /* autoplay quirks ignored */
+    }
+  }
+
+  function closeCamera(save) {
+    if (camera.stream) {
+      camera.stream.getTracks().forEach((t) => t.stop());
+      camera.stream = null;
+    }
+    camera.els.video.srcObject = null;
+    camera.els.overlay.hidden = true;
+    camera.els.overlay.setAttribute("aria-hidden", "true");
+
+    if (save && camera.buffer.length && camera.group) {
+      commitBufferedPhotos(camera.group, camera.buffer);
+    }
+    camera.buffer = [];
+    camera.group = null;
+    renderCameraBuffer();
+    updateCameraCount();
+  }
+
+  function flashScreen() {
+    camera.els.flash.classList.add("show");
+    setTimeout(() => camera.els.flash.classList.remove("show"), 110);
+  }
+
+  function captureFrame() {
+    const video = camera.els.video;
+    if (!video.videoWidth || !video.videoHeight) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    const longest = Math.max(w, h);
+    const scale = longest > MAX_DIMENSION ? MAX_DIMENSION / longest : 1;
+    const outW = Math.round(w * scale);
+    const outH = Math.round(h * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, outW, outH);
+    const stampDate = new Date();
+    drawOverlay(ctx, outW, outH, formatStamp(stampDate), formatGps(state.gps));
+    const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    const photo = {
+      id: uid("p"),
+      dataUrl,
+      width: outW,
+      height: outH,
+      takenAt: stampDate.toISOString(),
+      gps: state.gps ? { ...state.gps } : null,
+      label: "",
+    };
+    camera.buffer.push(photo);
+    flashScreen();
+    renderCameraBuffer();
+    updateCameraCount();
+  }
+
+  function updateCameraCount() {
+    const n = camera.buffer.length;
+    camera.els.count.textContent = n ? `${n} captured` : "0 captured";
+    camera.els.done.textContent = n ? `Done (${n})` : "Done";
+  }
+
+  function renderCameraBuffer() {
+    const el = camera.els.thumbs;
+    el.innerHTML = "";
+    camera.buffer.forEach((photo, i) => {
+      const wrap = document.createElement("div");
+      wrap.className = "cam-thumb";
+      const img = document.createElement("img");
+      img.src = photo.dataUrl;
+      wrap.appendChild(img);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.textContent = "×";
+      rm.addEventListener("click", () => {
+        camera.buffer.splice(i, 1);
+        renderCameraBuffer();
+        updateCameraCount();
+      });
+      wrap.appendChild(rm);
+      el.appendChild(wrap);
+    });
+  }
+
+  async function commitBufferedPhotos(group, photos) {
+    for (const photo of photos) {
+      photo.propertyId = state.property.id;
+      photo.label = `${group.name} — ${group.photoIds.length + 1}`;
+      state.photos.set(photo.id, photo);
+      group.photoIds.push(photo.id);
+      try {
+        await savePhotoNow(photo);
+      } catch (err) {
+        console.error(err);
+      }
+      renderThumb(group, photo);
+      updateGroupCount(group);
+    }
+    updateExportButton();
+    saveProperty();
+    toast(`Added ${photos.length} photo${photos.length === 1 ? "" : "s"} to ${group.name}.`);
+  }
+
+  camera.els.shutter.addEventListener("click", captureFrame);
+  camera.els.done.addEventListener("click", () => closeCamera(true));
+  camera.els.cancel.addEventListener("click", () => {
+    if (camera.buffer.length && !confirm("Discard all captured photos?")) return;
+    closeCamera(false);
+  });
+  camera.els.switch.addEventListener("click", async () => {
+    try {
+      await startCameraStream(camera.facingMode === "environment" ? "user" : "environment");
+    } catch (err) {
+      console.warn(err);
+      toast("Couldn't switch camera.", "err");
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (camera.els.overlay.hidden) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      camera.els.cancel.click();
+    } else if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      captureFrame();
+    }
+  });
 
   // -------------------- EXIF / binary helpers --------------------
   function exifDateTime(iso) {
@@ -879,6 +1067,9 @@
     doc.setFont("helvetica", "normal");
     doc.setFontSize(12);
     const colRight = pageW - margin;
+    const LINK_R = 22;
+    const LINK_G = 82;
+    const LINK_B = 178;
 
     if (!groupsWithPhotos.length) {
       doc.setTextColor(120);
@@ -886,35 +1077,60 @@
       doc.setTextColor(0);
     }
 
+    doc.setTextColor(120);
+    doc.setFontSize(9);
+    doc.text("Tap a section title to jump to that page.", margin, cy);
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+    cy += 18;
+
     let total = 0;
     for (const g of groupsWithPhotos) {
       const target = groupStartPages.get(g.id);
       const title = g.name;
-      const count = `${g.photoIds.length}`;
+      const countText = `${g.photoIds.length} photo${g.photoIds.length === 1 ? "" : "s"}`;
+      const pageText = `p. ${target}`;
       total += g.photoIds.length;
 
-      const textW = doc.getTextWidth(title);
-      doc.setTextColor(11, 61, 46);
-      doc.textWithLink(title, margin, cy, { pageNumber: target });
-      doc.setTextColor(80);
-      doc.text(count, colRight, cy, { align: "right" });
+      const titleW = doc.getTextWidth(title);
+      const pageW_text = doc.getTextWidth(pageText);
+      const countW = doc.getTextWidth(countText);
 
-      // Dotted leader between title and page/count
-      const dotsStartX = margin + textW + 8;
-      const dotsEndX = colRight - doc.getTextWidth(count) - 8;
+      // Title, blue + underlined + linked
+      doc.setTextColor(LINK_R, LINK_G, LINK_B);
+      doc.textWithLink(title, margin, cy, { pageNumber: target });
+      doc.setDrawColor(LINK_R, LINK_G, LINK_B);
+      doc.setLineWidth(0.6);
+      doc.line(margin, cy + 2, margin + titleW, cy + 2);
+
+      // Page number, blue + underlined + linked, right-aligned
+      const pageX = colRight - pageW_text;
+      doc.textWithLink(pageText, pageX, cy, { pageNumber: target });
+      doc.line(pageX, cy + 2, colRight, cy + 2);
+
+      // Count, muted grey, sits just left of page number
+      doc.setTextColor(110);
+      const countRightX = pageX - 10;
+      doc.text(countText, countRightX, cy, { align: "right" });
+
+      // Dotted leader between title and count
+      const dotsStartX = margin + titleW + 8;
+      const dotsEndX = countRightX - countW - 8;
       if (dotsEndX > dotsStartX) {
-        doc.setTextColor(160);
+        doc.setTextColor(170);
         doc.setFontSize(10);
         const dotStr = " .".repeat(Math.max(1, Math.floor((dotsEndX - dotsStartX) / 3)));
         doc.text(dotStr, dotsStartX, cy);
         doc.setFontSize(12);
       }
 
-      // Make the entire line clickable
+      // Whole-row clickable rectangle as a convenience fallback
       doc.link(margin, cy - 12, colRight - margin, 18, { pageNumber: target });
+
+      doc.setLineWidth(0.2);
       doc.setTextColor(0);
-      cy += 20;
-      if (cy > pageH - margin - 40) break; // one-page cap
+      cy += 22;
+      if (cy > pageH - margin - 40) break;
     }
 
     if (groupsWithPhotos.length) {
@@ -1091,6 +1307,37 @@
   wireMetaInputs();
 
   // -------------------- Boot --------------------
+  async function autoRequestGps() {
+    if (!("geolocation" in navigator)) {
+      setGpsStatus("err", "No GPS support");
+      return;
+    }
+    let state_perm = null;
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const res = await navigator.permissions.query({ name: "geolocation" });
+        state_perm = res.state;
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    if (state_perm === "denied") {
+      setGpsStatus("err", "GPS blocked");
+      alert(
+        "Location is currently blocked for this site.\n\n" +
+          "Photos won't carry a GPS stamp until you allow location in your browser settings and tap Enable GPS in the header."
+      );
+      return;
+    }
+    if (state_perm !== "granted") {
+      alert(
+        "Photo Evidence uses your device GPS to stamp each photo with a location.\n\n" +
+          "When prompted by the browser, choose Allow. You can change this any time from the Enable GPS button in the header."
+      );
+    }
+    enableGps();
+  }
+
   (async function boot() {
     try {
       const list = await IDB.listProperties();
@@ -1099,15 +1346,14 @@
 
       if (!list.length) {
         await createProperty("Property 1");
-        return;
+      } else {
+        const savedId = localStorage.getItem(ACTIVE_KEY);
+        const chosen = list.find((p) => p.id === savedId) || list[0];
+        await switchProperty(chosen.id);
       }
-      const savedId = localStorage.getItem(ACTIVE_KEY);
-      const chosen = list.find((p) => p.id === savedId) || list[0];
-      await switchProperty(chosen.id);
     } catch (err) {
       console.error(err);
       toast("Couldn't load saved data — starting fresh.", "err");
-      // Fall back to in-memory property so UI still works
       state.property = makeNewProperty("Property 1");
       state.properties = [{ id: state.property.id, name: state.property.name }];
       state.currentId = state.property.id;
@@ -1115,5 +1361,6 @@
       renderGroups();
       renderPropertySelect();
     }
+    autoRequestGps();
   })();
 })();

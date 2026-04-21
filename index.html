@@ -90,21 +90,17 @@
             <span class="group-count">0 photos</span>
           </div>
           <div class="group-actions">
-            <label class="btn btn-primary-soft">
-              <input type="file" class="file-input-camera" accept="image/*" capture="environment" multiple hidden />
-              Take photo
-            </label>
+            <button class="btn btn-primary-soft btn-take-photo" type="button">Take photo</button>
             <button class="btn btn-ghost-dark btn-remove-group" type="button" title="Remove group">Remove</button>
           </div>
         </header>
         <div class="thumbs">
-          <label class="thumb thumb-add" title="Take another photo">
-            <input type="file" class="file-input-camera-tile" accept="image/*" capture="environment" multiple hidden />
+          <button type="button" class="thumb thumb-add btn-take-photo-tile" title="Take another photo">
             <span class="thumb-add-inner">
               <span class="thumb-add-plus" aria-hidden="true">+</span>
               <span class="thumb-add-label">Take photo</span>
             </span>
-          </label>
+          </button>
         </div>
       </article>
     </template>
@@ -120,6 +116,29 @@
     </template>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="camera-overlay" class="camera-overlay" hidden aria-hidden="true">
+      <video id="camera-video" autoplay playsinline muted></video>
+      <div class="camera-flash" id="camera-flash"></div>
+      <div class="camera-hud">
+        <div class="camera-hud-top">
+          <button id="camera-cancel" type="button" class="camera-hud-btn">Cancel</button>
+          <div class="camera-hud-title">
+            <span id="camera-title">Group</span>
+            <span class="camera-count" id="camera-count">0</span>
+          </div>
+          <button id="camera-done" type="button" class="camera-hud-btn primary">Done</button>
+        </div>
+        <div class="camera-thumbs" id="camera-thumbs"></div>
+        <div class="camera-hud-bottom">
+          <button id="camera-switch" type="button" class="camera-hud-btn ghost" title="Switch camera" aria-label="Switch camera">⇄</button>
+          <button id="camera-shutter" type="button" class="camera-shutter" aria-label="Capture">
+            <span class="camera-shutter-inner"></span>
+          </button>
+          <span class="camera-hud-btn ghost placeholder" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
