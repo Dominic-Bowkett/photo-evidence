@@ -127,6 +127,7 @@
     gpsDot: document.getElementById("gps-dot"),
     gpsLabel: document.getElementById("gps-label"),
     exportBtn: document.getElementById("btn-export"),
+    exportZipBtn: document.getElementById("btn-export-zip"),
     toast: document.getElementById("toast"),
     propSelect: document.getElementById("property-select"),
     newPropBtn: document.getElementById("btn-new-property"),
@@ -633,19 +634,106 @@
   }
 
   function updateExportButton() {
-    if (!state.property) {
-      els.exportBtn.disabled = true;
-      return;
+    const disabled = !state.property || !state.property.groups.some((g) => g.photoIds.length > 0);
+    els.exportBtn.disabled = disabled;
+    els.exportZipBtn.disabled = disabled;
+  }
+
+  // -------------------- EXIF / binary helpers --------------------
+  function exifDateTime(iso) {
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, "0");
+    return (
+      `${d.getFullYear()}:${pad(d.getMonth() + 1)}:${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    );
+  }
+
+  function degToDmsRational(deg) {
+    const abs = Math.abs(deg);
+    const d = Math.floor(abs);
+    const mFloat = (abs - d) * 60;
+    const m = Math.floor(mFloat);
+    const s = Math.round((mFloat - m) * 60 * 10000);
+    return [
+      [d, 1],
+      [m, 1],
+      [s, 10000],
+    ];
+  }
+
+  function buildExifDataUrl(photo) {
+    if (typeof piexif === "undefined") return photo.dataUrl;
+    try {
+      const dt = exifDateTime(photo.takenAt || new Date().toISOString());
+      const zeroth = {
+        [piexif.ImageIFD.DateTime]: dt,
+        [piexif.ImageIFD.Software]: "Photo Evidence",
+      };
+      const exif = {
+        [piexif.ExifIFD.DateTimeOriginal]: dt,
+        [piexif.ExifIFD.DateTimeDigitized]: dt,
+      };
+      const gps = {};
+      if (photo.gps) {
+        const lat = photo.gps.latitude;
+        const lon = photo.gps.longitude;
+        gps[piexif.GPSIFD.GPSLatitudeRef] = lat >= 0 ? "N" : "S";
+        gps[piexif.GPSIFD.GPSLatitude] = degToDmsRational(lat);
+        gps[piexif.GPSIFD.GPSLongitudeRef] = lon >= 0 ? "E" : "W";
+        gps[piexif.GPSIFD.GPSLongitude] = degToDmsRational(lon);
+        const d = new Date(photo.takenAt || Date.now());
+        const pad = (n) => String(n).padStart(2, "0");
+        gps[piexif.GPSIFD.GPSDateStamp] =
+          `${d.getUTCFullYear()}:${pad(d.getUTCMonth() + 1)}:${pad(d.getUTCDate())}`;
+        gps[piexif.GPSIFD.GPSTimeStamp] = [
+          [d.getUTCHours(), 1],
+          [d.getUTCMinutes(), 1],
+          [d.getUTCSeconds(), 1],
+        ];
+      }
+      const exifStr = piexif.dump({ "0th": zeroth, Exif: exif, GPS: gps });
+      return piexif.insert(exifStr, photo.dataUrl);
+    } catch (err) {
+      console.warn("EXIF injection failed; using plain JPEG.", err);
+      return photo.dataUrl;
     }
-    const anyPhotos = state.property.groups.some((g) => g.photoIds.length > 0);
-    els.exportBtn.disabled = !anyPhotos;
+  }
+
+  function dataUrlToBytes(dataUrl) {
+    const base64 = dataUrl.split(",")[1] || "";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function saveBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   // -------------------- PDF export with linked contents --------------------
-  async function exportPdf() {
+  function reportBaseName() {
+    const meta = state.property.meta;
+    const parts = [
+      "photo-evidence",
+      slugify(state.property.name || "property"),
+      meta.ref ? slugify(meta.ref) : null,
+      meta.date || todayISO(),
+    ].filter(Boolean);
+    return parts.join("_");
+  }
+
+  async function buildPdf() {
     if (!window.jspdf || !window.jspdf.jsPDF) {
-      toast("PDF library failed to load.", "err");
-      return;
+      throw new Error("PDF library failed to load.");
     }
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "pt", format: "a4", compress: true });
@@ -837,14 +925,66 @@
       doc.setTextColor(0);
     }
 
-    const nameParts = [
-      "photo-evidence",
-      slugify(state.property.name || "property"),
-      meta.ref ? slugify(meta.ref) : null,
-      meta.date || todayISO(),
-    ].filter(Boolean);
-    doc.save(`${nameParts.join("_")}.pdf`);
-    toast("PDF saved.");
+    return { doc, filename: `${reportBaseName()}.pdf` };
+  }
+
+  async function exportPdf() {
+    try {
+      const { doc, filename } = await buildPdf();
+      doc.save(filename);
+      toast("PDF saved.");
+    } catch (err) {
+      console.error(err);
+      toast(err.message || "Failed to build PDF.", "err");
+    }
+  }
+
+  async function exportZip() {
+    if (typeof JSZip === "undefined") {
+      toast("ZIP library failed to load.", "err");
+      return;
+    }
+    try {
+      toast("Building ZIP…");
+      const { doc, filename: pdfName } = await buildPdf();
+      const pdfBlob = doc.output("blob");
+
+      const zip = new JSZip();
+      zip.file(pdfName, pdfBlob);
+
+      const groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
+      const usedGroupDirs = new Map();
+      for (const g of groupsWithPhotos) {
+        let dir = slugify(g.name);
+        const n = (usedGroupDirs.get(dir) || 0) + 1;
+        usedGroupDirs.set(dir, n);
+        if (n > 1) dir = `${dir}-${n}`;
+        const folder = zip.folder(dir);
+
+        let index = 0;
+        for (const pid of g.photoIds) {
+          const photo = state.photos.get(pid);
+          if (!photo) continue;
+          index += 1;
+          const stampedDataUrl = buildExifDataUrl(photo);
+          const bytes = dataUrlToBytes(stampedDataUrl);
+          const label = slugify(photo.label || `${g.name}-${index}`);
+          const name = `${String(index).padStart(2, "0")}_${label}.jpg`;
+          const entryDate = photo.takenAt ? new Date(photo.takenAt) : new Date();
+          folder.file(name, bytes, { date: entryDate });
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "STORE", // JPEGs don't compress; skip to keep it fast.
+      });
+      saveBlob(zipBlob, `${reportBaseName()}.zip`);
+      toast("ZIP saved.");
+    } catch (err) {
+      console.error(err);
+      toast(err.message || "Failed to build ZIP.", "err");
+    }
   }
 
   // -------------------- Wiring --------------------
@@ -883,10 +1023,11 @@
   });
 
   els.exportBtn.addEventListener("click", () => {
-    exportPdf().catch((err) => {
-      console.error(err);
-      toast("Failed to build PDF.", "err");
-    });
+    exportPdf();
+  });
+
+  els.exportZipBtn.addEventListener("click", () => {
+    exportZip();
   });
 
   els.propSelect.addEventListener("change", () => {

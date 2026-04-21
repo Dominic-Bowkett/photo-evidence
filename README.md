@@ -25,6 +25,10 @@ No server, no build step — open `index.html` in a modern browser.
 - **Drag to reorder** photos within a group.
 - **PDF export** with a cover page, a **clickable contents page** (each
   group title links to its section), one group per section, and page numbers.
+- **ZIP export** — one archive containing the PDF plus every photo as a
+  separate JPEG, grouped into folders by section. **EXIF `DateTimeOriginal`
+  and GPS are written into each JPEG** (via piexifjs) so the capture date
+  survives when files are extracted and opened in Photos/Explorer/Finder.
 
 ## Run locally
 
