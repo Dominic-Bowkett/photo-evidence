@@ -978,11 +978,27 @@
     doc.line(margin, margin + 12, pageW - margin, margin + 12);
     doc.setLineWidth(0.2);
 
+    // Bookmarks / outline (always clickable in a viewer's sidebar, even when
+    // inline annotation links are not honoured).
+    const addOutline = (label, pageNumber) => {
+      try {
+        if (doc.outline && typeof doc.outline.add === "function") {
+          doc.outline.add(null, label, { pageNumber });
+        }
+      } catch (_) {
+        /* outline plugin unavailable */
+      }
+    };
+    addOutline("Cover", 1);
+    addOutline("Contents", contentsPageNumber);
+
     const groupStartPages = new Map();
 
     for (const g of groupsWithPhotos) {
       doc.addPage();
-      groupStartPages.set(g.id, doc.internal.getNumberOfPages());
+      const startPage = doc.internal.getNumberOfPages();
+      groupStartPages.set(g.id, startPage);
+      addOutline(g.name, startPage);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
@@ -1079,12 +1095,17 @@
 
     doc.setTextColor(120);
     doc.setFontSize(9);
-    doc.text("Tap a section title to jump to that page.", margin, cy);
+    doc.text(
+      "Tap a section title to jump to that page. Bookmarks are also available in your PDF viewer's sidebar.",
+      margin,
+      cy
+    );
     doc.setFontSize(12);
     doc.setTextColor(0);
     cy += 18;
 
     let total = 0;
+    const ROW_HEIGHT = 26;
     for (const g of groupsWithPhotos) {
       const target = groupStartPages.get(g.id);
       const title = g.name;
@@ -1096,19 +1117,19 @@
       const pageW_text = doc.getTextWidth(pageText);
       const countW = doc.getTextWidth(countText);
 
-      // Title, blue + underlined + linked
+      // Title in blue, underlined
       doc.setTextColor(LINK_R, LINK_G, LINK_B);
-      doc.textWithLink(title, margin, cy, { pageNumber: target });
+      doc.text(title, margin, cy);
       doc.setDrawColor(LINK_R, LINK_G, LINK_B);
       doc.setLineWidth(0.6);
       doc.line(margin, cy + 2, margin + titleW, cy + 2);
 
-      // Page number, blue + underlined + linked, right-aligned
+      // Right-aligned page number in blue, underlined
       const pageX = colRight - pageW_text;
-      doc.textWithLink(pageText, pageX, cy, { pageNumber: target });
+      doc.text(pageText, pageX, cy);
       doc.line(pageX, cy + 2, colRight, cy + 2);
 
-      // Count, muted grey, sits just left of page number
+      // Count, muted grey, sits left of the page number
       doc.setTextColor(110);
       const countRightX = pageX - 10;
       doc.text(countText, countRightX, cy, { align: "right" });
@@ -1124,12 +1145,17 @@
         doc.setFontSize(12);
       }
 
-      // Whole-row clickable rectangle as a convenience fallback
-      doc.link(margin, cy - 12, colRight - margin, 18, { pageNumber: target });
+      // ONE generous clickable rectangle covering the whole row.
+      // A single explicit link() is more reliable across PDF viewers than
+      // the thin rect that textWithLink() creates.
+      doc.link(margin - 4, cy - 14, colRight - margin + 8, ROW_HEIGHT, {
+        pageNumber: target,
+      });
 
       doc.setLineWidth(0.2);
       doc.setTextColor(0);
-      cy += 22;
+      doc.setDrawColor(0);
+      cy += ROW_HEIGHT;
       if (cy > pageH - margin - 40) break;
     }
 
