@@ -19,8 +19,10 @@ No server, no build step — open `index.html` in a modern browser.
   back tomorrow and the work is still there. Photos are stored locally too.
 - **Groups / categories**: seeded with *External Elevations*; add more on the
   fly (e.g. Loft insulation, Boiler, Meters, Windows).
-- **Take photo** (camera directly, uses `capture="environment"`) or
-  **Add photos** (multi-select from gallery).
+- **Camera-only capture** — each group has a **Take photo** button that
+  opens the device camera (`capture="environment"`). The date recorded is
+  the moment of capture, not an arbitrary upload time, and pre-existing
+  gallery images cannot be submitted as evidence.
 - **Per-photo labels** (default `"{Group} — {n}"`, editable).
 - **Drag to reorder** photos within a group.
 - **PDF export** with a cover page, a **clickable contents page** (each

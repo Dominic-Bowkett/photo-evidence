@@ -491,12 +491,6 @@
       }
     });
 
-    const galleryInput = node.querySelector(".file-input-gallery");
-    galleryInput.addEventListener("change", async (e) => {
-      const files = Array.from(e.target.files || []);
-      galleryInput.value = "";
-      if (files.length) await addPhotos(group, files);
-    });
     const cameraInput = node.querySelector(".file-input-camera");
     cameraInput.addEventListener("change", async (e) => {
       const files = Array.from(e.target.files || []);
