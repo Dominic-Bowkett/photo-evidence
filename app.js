@@ -7,7 +7,10 @@
   const STORE_PHOTOS = "photos";
   const ACTIVE_KEY = "photo-evidence:active-property";
 
-  const DEFAULT_GROUPS = [{ name: "External Elevations" }];
+  const DEFAULT_GROUPS = [
+    { name: "External Elevations" },
+    { name: "Meters" },
+  ];
   const MAX_DIMENSION = 2000;
   const JPEG_QUALITY = 0.88;
 
@@ -439,6 +442,15 @@
     for (const p of photos) state.photos.set(p.id, p);
     localStorage.setItem(ACTIVE_KEY, id);
 
+    if (!state.property.groups || !state.property.groups.length) {
+      state.property.groups = DEFAULT_GROUPS.map((g) => ({
+        id: uid("g"),
+        name: g.name,
+        photoIds: [],
+      }));
+      saveProperty();
+    }
+
     renderMeta();
     renderGroups();
     renderPropertySelect();
@@ -491,11 +503,13 @@
       }
     });
 
-    const cameraInput = node.querySelector(".file-input-camera");
-    cameraInput.addEventListener("change", async (e) => {
-      const files = Array.from(e.target.files || []);
-      cameraInput.value = "";
-      if (files.length) await addPhotos(group, files);
+    const cameraInputs = node.querySelectorAll(".file-input-camera, .file-input-camera-tile");
+    cameraInputs.forEach((input) => {
+      input.addEventListener("change", async (e) => {
+        const files = Array.from(e.target.files || []);
+        input.value = "";
+        if (files.length) await addPhotos(group, files);
+      });
     });
 
     node.querySelector(".btn-remove-group").addEventListener("click", () => removeGroup(group.id));
@@ -559,12 +573,16 @@
       thumbsEl.insertBefore(dragging, before ? node : node.nextSibling);
     });
     node.addEventListener("drop", () => {
-      const newOrder = Array.from(thumbsEl.querySelectorAll(".thumb")).map((el) => el.dataset.photoId);
+      const newOrder = Array.from(thumbsEl.querySelectorAll(".thumb"))
+        .map((el) => el.dataset.photoId)
+        .filter(Boolean);
       group.photoIds = newOrder.slice();
       saveProperty();
     });
 
-    thumbsEl.appendChild(node);
+    const addTile = thumbsEl.querySelector(".thumb-add");
+    if (addTile) thumbsEl.insertBefore(node, addTile);
+    else thumbsEl.appendChild(node);
   }
 
   async function addPhotos(group, files) {
@@ -1004,13 +1022,29 @@
   els.gpsBtn.addEventListener("click", enableGps);
 
   els.addGroupBtn.addEventListener("click", () => {
-    const name = els.addGroupName.value.trim();
-    if (!name) {
-      toast("Enter a group name.", "err");
-      return;
+    if (!state.property) return;
+    const typed = els.addGroupName.value.trim();
+    const name = typed || `Group ${state.property.groups.length + 1}`;
+    try {
+      addGroup(name);
+      els.addGroupName.value = "";
+      const el = els.groups.lastElementChild;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        const title = el.querySelector(".group-title");
+        if (!typed && title) {
+          title.focus();
+          const range = document.createRange();
+          range.selectNodeContents(title);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast("Couldn't add group.", "err");
     }
-    addGroup(name);
-    els.addGroupName.value = "";
   });
   els.addGroupName.addEventListener("keydown", (e) => {
     if (e.key === "Enter") els.addGroupBtn.click();

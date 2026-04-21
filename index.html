@@ -91,13 +91,21 @@
           </div>
           <div class="group-actions">
             <label class="btn btn-primary-soft">
-              <input type="file" class="file-input-camera" accept="image/*" capture="environment" hidden />
+              <input type="file" class="file-input-camera" accept="image/*" capture="environment" multiple hidden />
               Take photo
             </label>
             <button class="btn btn-ghost-dark btn-remove-group" type="button" title="Remove group">Remove</button>
           </div>
         </header>
-        <div class="thumbs"></div>
+        <div class="thumbs">
+          <label class="thumb thumb-add" title="Take another photo">
+            <input type="file" class="file-input-camera-tile" accept="image/*" capture="environment" multiple hidden />
+            <span class="thumb-add-inner">
+              <span class="thumb-add-plus" aria-hidden="true">+</span>
+              <span class="thumb-add-label">Take photo</span>
+            </span>
+          </label>
+        </div>
       </article>
     </template>
 
