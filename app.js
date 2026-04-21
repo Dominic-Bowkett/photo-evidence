@@ -380,6 +380,35 @@
   }
 
   // -------------------- Property manager --------------------
+  function makeDefaultGroups() {
+    return DEFAULT_GROUPS.map((g) => ({
+      id: uid("g"),
+      name: g.name,
+      photoIds: [],
+      protected: true,
+    }));
+  }
+
+  function applyProtectedFlag(property) {
+    if (!property || !Array.isArray(property.groups)) return false;
+    const defaultNames = new Set(DEFAULT_GROUPS.map((g) => g.name.toLowerCase()));
+    const claimed = new Set();
+    let changed = false;
+    for (const group of property.groups) {
+      if (group.protected) {
+        claimed.add((group.name || "").toLowerCase());
+        continue;
+      }
+      const normalized = (group.name || "").trim().toLowerCase();
+      if (defaultNames.has(normalized) && !claimed.has(normalized)) {
+        group.protected = true;
+        claimed.add(normalized);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function makeNewProperty(name) {
     const id = uid("prop");
     const property = {
@@ -391,11 +420,7 @@
         ref: "",
         date: todayISO(),
       },
-      groups: DEFAULT_GROUPS.map((g) => ({
-        id: uid("g"),
-        name: g.name,
-        photoIds: [],
-      })),
+      groups: makeDefaultGroups(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -443,11 +468,9 @@
     localStorage.setItem(ACTIVE_KEY, id);
 
     if (!state.property.groups || !state.property.groups.length) {
-      state.property.groups = DEFAULT_GROUPS.map((g) => ({
-        id: uid("g"),
-        name: g.name,
-        photoIds: [],
-      }));
+      state.property.groups = makeDefaultGroups();
+      saveProperty();
+    } else if (applyProtectedFlag(state.property)) {
       saveProperty();
     }
 
@@ -508,7 +531,12 @@
       btn.addEventListener("click", () => openCamera(group));
     });
 
-    node.querySelector(".btn-remove-group").addEventListener("click", () => removeGroup(group.id));
+    const removeBtn = node.querySelector(".btn-remove-group");
+    if (group.protected) {
+      removeBtn.remove();
+    } else {
+      removeBtn.addEventListener("click", () => removeGroup(group.id));
+    }
 
     els.groups.appendChild(node);
     for (const id of group.photoIds) {
@@ -544,6 +572,8 @@
     });
 
     node.querySelector(".thumb-remove").addEventListener("click", async () => {
+      const label = photo.label || `photo ${group.photoIds.indexOf(photo.id) + 1}`;
+      if (!confirm(`Delete "${label}" from ${group.name}? This can't be undone.`)) return;
       const i = group.photoIds.indexOf(photo.id);
       if (i !== -1) group.photoIds.splice(i, 1);
       state.photos.delete(photo.id);
@@ -621,9 +651,11 @@
     const idx = state.property.groups.findIndex((g) => g.id === groupId);
     if (idx === -1) return;
     const group = state.property.groups[idx];
-    if (group.photoIds.length) {
-      if (!confirm(`Remove "${group.name}" and its ${group.photoIds.length} photo(s)?`)) return;
+    if (group.protected) {
+      toast("This is a default group and can't be removed.", "err");
+      return;
     }
+    if (!confirm(`Remove the "${group.name}" group${group.photoIds.length ? ` and its ${group.photoIds.length} photo(s)` : ""}? This can't be undone.`)) return;
     (async () => {
       for (const pid of group.photoIds) {
         state.photos.delete(pid);
