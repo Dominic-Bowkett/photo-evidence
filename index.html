@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b3d2e" />
+    <title>Photo Evidence — Domestic Energy Assessor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">PE</span>
+        <div>
+          <h1>Photo Evidence</h1>
+          <p class="subtitle">Domestic Energy Assessor — stamped &amp; geotagged</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-enable-gps" class="btn btn-ghost" type="button">
+          <span class="dot" id="gps-dot"></span>
+          <span id="gps-label">Enable GPS</span>
+        </button>
+        <button id="btn-export" class="btn btn-primary" type="button" disabled>Download PDF</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card meta">
+        <h2>Job details</h2>
+        <div class="grid">
+          <label>
+            <span>Assessor</span>
+            <input id="meta-assessor" type="text" placeholder="e.g. J. Smith" autocomplete="name" />
+          </label>
+          <label>
+            <span>Property address</span>
+            <input id="meta-address" type="text" placeholder="e.g. 12 Acacia Avenue, Leeds LS1 2AB" autocomplete="street-address" />
+          </label>
+          <label>
+            <span>Job reference</span>
+            <input id="meta-ref" type="text" placeholder="e.g. EPC-2026-00421" />
+          </label>
+          <label>
+            <span>Date of assessment</span>
+            <input id="meta-date" type="date" />
+          </label>
+        </div>
+      </section>
+
+      <section id="groups" class="groups" aria-label="Photo groups"></section>
+
+      <div class="add-group-row">
+        <input id="new-group-name" type="text" placeholder="Add a new group, e.g. Loft insulation" />
+        <button id="btn-add-group" class="btn" type="button">Add group</button>
+      </div>
+
+      <section class="card tips">
+        <h2>How it works</h2>
+        <ul>
+          <li>Tap <strong>Enable GPS</strong> once so each photo can be stamped with its coordinates.</li>
+          <li>Inside each group, tap <strong>Add photos</strong> to pick multiple from the gallery or take a new one with the camera.</li>
+          <li>Every image is re-rendered with a <strong>date/time and GPS overlay</strong> in the bottom right corner.</li>
+          <li>Give each photo a label (the default is the group name &amp; number), then press <strong>Download PDF</strong>.</li>
+        </ul>
+      </section>
+    </main>
+
+    <template id="group-template">
+      <article class="card group" data-group-id="">
+        <header class="group-header">
+          <div class="group-title-wrap">
+            <h2 class="group-title" contenteditable="true" spellcheck="false"></h2>
+            <span class="group-count">0 photos</span>
+          </div>
+          <div class="group-actions">
+            <label class="btn">
+              <input type="file" class="file-input" accept="image/*" multiple hidden />
+              Add photos
+            </label>
+            <button class="btn btn-ghost btn-remove-group" type="button" title="Remove group">Remove</button>
+          </div>
+        </header>
+        <div class="thumbs"></div>
+      </article>
+    </template>
+
+    <template id="thumb-template">
+      <figure class="thumb" draggable="true">
+        <img alt="" />
+        <figcaption>
+          <input type="text" class="thumb-label" placeholder="Label" />
+          <button type="button" class="thumb-remove" title="Remove photo" aria-label="Remove photo">&times;</button>
+        </figcaption>
+      </figure>
+    </template>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
