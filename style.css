@@ -184,6 +184,98 @@ input[type="date"]:focus {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.btn-ghost-dark {
+  --btn-bg: transparent;
+  --btn-ink: var(--muted);
+  border-color: var(--line);
+}
+
+.btn-primary-soft {
+  --btn-bg: #e6f3ec;
+  --btn-ink: var(--primary);
+  border-color: #c7e3d3;
+}
+
+.btn-danger-ghost {
+  --btn-bg: transparent;
+  --btn-ink: var(--danger);
+  border-color: #e4c6c6;
+  font-size: 0.85rem;
+  padding: 7px 10px;
+}
+
+.property-switcher {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.property-switcher select {
+  max-width: 220px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font: inherit;
+}
+
+.property-switcher select option {
+  color: #111;
+  background: #fff;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.meta-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.meta-header h2 {
+  margin: 0;
+}
+
+.meta-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.save-status {
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef3f0;
+  min-width: 60px;
+  text-align: center;
+}
+
+.save-status.saving {
+  color: #7a5200;
+  background: #fff2d6;
+}
+
+.save-status.error {
+  color: #fff;
+  background: var(--danger);
+}
+
 .dot {
   width: 9px;
   height: 9px;
@@ -369,6 +461,14 @@ input[type="date"]:focus {
   .app-header {
     padding: 10px 12px;
     padding-top: calc(10px + env(safe-area-inset-top));
+    flex-wrap: wrap;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .property-switcher select {
+    max-width: 140px;
   }
   .container {
     padding: 12px;

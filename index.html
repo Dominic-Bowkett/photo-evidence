@@ -17,6 +17,11 @@
         </div>
       </div>
       <div class="header-actions">
+        <div class="property-switcher">
+          <label for="property-select" class="sr-only">Current property</label>
+          <select id="property-select" aria-label="Current property"></select>
+          <button id="btn-new-property" class="btn btn-ghost" type="button" title="New property">+ New</button>
+        </div>
         <button id="btn-enable-gps" class="btn btn-ghost" type="button">
           <span class="dot" id="gps-dot"></span>
           <span id="gps-label">Enable GPS</span>
@@ -27,15 +32,25 @@
 
     <main class="container">
       <section class="card meta">
-        <h2>Job details</h2>
+        <div class="meta-header">
+          <h2>Job details</h2>
+          <div class="meta-actions">
+            <span class="save-status" id="save-status" aria-live="polite">Saved</span>
+            <button id="btn-delete-property" class="btn btn-danger-ghost" type="button">Delete property</button>
+          </div>
+        </div>
         <div class="grid">
+          <label>
+            <span>Property name (used in the switcher)</span>
+            <input id="meta-name" type="text" placeholder="e.g. 12 Acacia Avenue" />
+          </label>
           <label>
             <span>Assessor</span>
             <input id="meta-assessor" type="text" placeholder="e.g. J. Smith" autocomplete="name" />
           </label>
           <label>
             <span>Property address</span>
-            <input id="meta-address" type="text" placeholder="e.g. 12 Acacia Avenue, Leeds LS1 2AB" autocomplete="street-address" />
+            <input id="meta-address" type="text" placeholder="Full address" autocomplete="street-address" />
           </label>
           <label>
             <span>Job reference</span>
@@ -59,9 +74,9 @@
         <h2>How it works</h2>
         <ul>
           <li>Tap <strong>Enable GPS</strong> once so each photo can be stamped with its coordinates.</li>
-          <li>Inside each group, tap <strong>Add photos</strong> to pick multiple from the gallery or take a new one with the camera.</li>
+          <li>Inside each group, tap <strong>Take photo</strong> to shoot a fresh one, or <strong>Add photos</strong> to pick several from the gallery.</li>
           <li>Every image is re-rendered with a <strong>date/time and GPS overlay</strong> in the bottom right corner.</li>
-          <li>Give each photo a label (the default is the group name &amp; number), then press <strong>Download PDF</strong>.</li>
+          <li>Work is autosaved to this browser — refresh or close the tab and it's still here. Switch between multiple properties using the picker above.</li>
         </ul>
       </section>
     </main>
@@ -74,11 +89,15 @@
             <span class="group-count">0 photos</span>
           </div>
           <div class="group-actions">
+            <label class="btn btn-primary-soft">
+              <input type="file" class="file-input-camera" accept="image/*" capture="environment" hidden />
+              Take photo
+            </label>
             <label class="btn">
-              <input type="file" class="file-input" accept="image/*" multiple hidden />
+              <input type="file" class="file-input-gallery" accept="image/*" multiple hidden />
               Add photos
             </label>
-            <button class="btn btn-ghost btn-remove-group" type="button" title="Remove group">Remove</button>
+            <button class="btn btn-ghost-dark btn-remove-group" type="button" title="Remove group">Remove</button>
           </div>
         </header>
         <div class="thumbs"></div>
