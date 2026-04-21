@@ -6,6 +6,7 @@
   const STORE_PROPERTIES = "properties";
   const STORE_PHOTOS = "photos";
   const ACTIVE_KEY = "photo-evidence:active-property";
+  const BACKUP_KEY = "photo-evidence:backup-to-photos";
 
   const DEFAULT_GROUPS = [
     { name: "External Elevations" },
@@ -159,6 +160,9 @@
     metaAddress: document.getElementById("meta-address"),
     metaRef: document.getElementById("meta-ref"),
     metaDate: document.getElementById("meta-date"),
+    backupToggle: document.getElementById("backup-toggle"),
+    backupToggleWrap: document.getElementById("backup-toggle-wrap"),
+    backupToggleHelp: document.getElementById("backup-toggle-help"),
   };
 
   // -------------------- Utils --------------------
@@ -1040,8 +1044,89 @@
     toast(`Added ${photos.length} photo${photos.length === 1 ? "" : "s"} to ${group.name}.`);
   }
 
+  // -------------------- Camera-roll backup via Web Share API --------------------
+  function backupSupported() {
+    try {
+      return (
+        typeof navigator !== "undefined" &&
+        typeof navigator.canShare === "function" &&
+        typeof navigator.share === "function" &&
+        typeof File === "function"
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function shouldBackupToPhotos() {
+    if (!backupSupported()) return false;
+    const stored = localStorage.getItem(BACKUP_KEY);
+    return stored === null ? true : stored === "true";
+  }
+
+  function setShouldBackup(v) {
+    localStorage.setItem(BACKUP_KEY, v ? "true" : "false");
+  }
+
+  function backupFilename(photo, group, index) {
+    const d = new Date(photo.takenAt || Date.now());
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp =
+      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_` +
+      `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    return `photo-evidence_${slugify(group.name)}_${stamp}_${String(index).padStart(2, "0")}.jpg`;
+  }
+
+  function buildBackupFiles(photos, group) {
+    const files = [];
+    photos.forEach((photo, i) => {
+      try {
+        const exifDataUrl = buildExifDataUrl(photo);
+        const bytes = dataUrlToBytes(exifDataUrl);
+        const blob = new Blob([bytes], { type: "image/jpeg" });
+        const file = new File([blob], backupFilename(photo, group, i + 1), {
+          type: "image/jpeg",
+          lastModified: new Date(photo.takenAt || Date.now()).getTime(),
+        });
+        files.push(file);
+      } catch (err) {
+        console.warn("Backup file prep failed", err);
+      }
+    });
+    return files;
+  }
+
+  // Must be called synchronously from a user-gesture handler (e.g. Done click).
+  function triggerPhotoBackup(photos, group) {
+    if (!shouldBackupToPhotos() || !photos.length) return;
+    const files = buildBackupFiles(photos, group);
+    if (!files.length) return;
+    let sharePayload;
+    try {
+      sharePayload = { files, title: `${group.name} photos`, text: `${group.name} evidence` };
+      if (!navigator.canShare(sharePayload)) return;
+    } catch (_) {
+      return;
+    }
+    navigator
+      .share(sharePayload)
+      .then(() => toast("Shared — tap Save Image in the sheet to back up to Photos."))
+      .catch((err) => {
+        if (err && err.name !== "AbortError") {
+          console.warn("Share failed", err);
+        }
+      });
+  }
+
   camera.els.shutter.addEventListener("click", captureFrame);
-  camera.els.done.addEventListener("click", () => closeCamera(true));
+  camera.els.done.addEventListener("click", () => {
+    // Snapshot the buffer before closeCamera clears it, and stay synchronous
+    // so navigator.share() retains its user-gesture credit.
+    const photos = camera.buffer.slice();
+    const group = camera.group;
+    closeCamera(true);
+    if (photos.length && group) triggerPhotoBackup(photos, group);
+  });
   camera.els.cancel.addEventListener("click", () => {
     if (camera.buffer.length && !confirm("Discard all captured photos?")) return;
     closeCamera(false);
@@ -1614,7 +1699,31 @@
     enableGps();
   }
 
+  function initBackupToggle() {
+    if (!els.backupToggle) return;
+    if (!backupSupported()) {
+      els.backupToggle.checked = false;
+      els.backupToggle.disabled = true;
+      els.backupToggleWrap.classList.add("unsupported");
+      if (els.backupToggleHelp) {
+        els.backupToggleHelp.innerHTML =
+          "Your browser doesn't support the Web Share API with files, so automatic Photos backup isn't available. Use <em>Download ZIP</em> as a backup instead.";
+      }
+      return;
+    }
+    els.backupToggle.checked = shouldBackupToPhotos();
+    els.backupToggle.addEventListener("change", () => {
+      setShouldBackup(els.backupToggle.checked);
+      toast(
+        els.backupToggle.checked
+          ? "Photos will be offered to your camera roll after each burst."
+          : "Automatic Photos backup turned off."
+      );
+    });
+  }
+
   (async function boot() {
+    initBackupToggle();
     try {
       const list = await IDB.listProperties();
       list.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));

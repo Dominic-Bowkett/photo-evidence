@@ -55,6 +55,24 @@ a confirm).
 unprotected group that can be renamed inline and deleted. The rest of the
 workflow (camera capture, labels, reorder, export) is identical.
 
+### Camera-roll backup
+- After you tap **Done** on a burst, the app can automatically open the
+  device's native share sheet with the just-captured JPEGs already attached.
+  Tap **Save Image** (iOS) or **Save to Gallery** (Android) once and the
+  whole batch lands in your camera roll — a belt-and-braces backup in case
+  the browser's stored data is ever cleared.
+- Each shared JPEG has the date/time overlay burned in and EXIF
+  `DateTimeOriginal` / GPS written via piexifjs, so the Photos app shows
+  the correct capture date and location.
+- A checkbox in the *Job details* card (**Back up photos to my phone after
+  each burst**) toggles this off if you don't want the share sheet on
+  every Done. Setting is remembered in `localStorage`.
+- Uses the Web Share API with files, which is a web-platform restriction:
+  browsers won't let a webpage write to Photos silently, so the one-tap
+  share sheet is as close to automatic as is possible. On browsers without
+  Web Share, the checkbox is disabled and the help text tells you to use
+  *Download ZIP* as a backup.
+
 ### Persistence
 - Everything is **autosaved to the browser** via IndexedDB — property
   metadata, groups, photo records, the lot. Refresh, close the tab, or come
