@@ -22,7 +22,7 @@
   ];
 
   const BUILDING_SUBGROUPS = [
-    { name: "Wall Thickness" },
+    { name: "Walls" },
     { name: "Roof" },
     { name: "Floor" },
   ];
@@ -431,6 +431,14 @@
   function migrateDefaults(property) {
     if (!property || !Array.isArray(property.groups)) return false;
     let changed = false;
+
+    // Rename legacy sub-group names that have been updated in the defaults.
+    for (const g of property.groups) {
+      if (g.section && (g.name || "").trim().toLowerCase() === "wall thickness") {
+        g.name = "Walls";
+        changed = true;
+      }
+    }
 
     // Add any missing flat default groups.
     const existingFlat = new Set(

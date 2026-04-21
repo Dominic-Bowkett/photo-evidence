@@ -42,7 +42,7 @@ External Elevations, Meters, Windows, Doors, Conservatory, Renewables,
 Mains Heating, Secondary Heating, Water Heating, Ventilation, Lighting.
 
 **Main Property section** (also protected), containing three sub-groups:
-Wall Thickness, Roof, Floor.
+Walls, Roof, Floor.
 
 **Extensions (clone of Main Property)**: a `+ Add extension` button beneath
 the Main Property section clones the three sub-groups into `Extension 1`,
@@ -88,7 +88,7 @@ workflow (camera capture, labels, reorder, export) is identical.
 - **Download ZIP** — a single archive containing:
   - The full PDF report at the root.
   - Every stamped JPEG under a folder structure that mirrors the groups:
-    `main-property/wall-thickness/01_front-wall-north.jpg`, etc.
+    `main-property/walls/01_front-wall-north.jpg`, etc.
   - **EXIF `DateTimeOriginal`, `DateTimeDigitized`, `DateTime`, GPS
     lat/lon, `GPSDateStamp`, `GPSTimeStamp`** written into each JPEG
     via piexifjs, so when the files are extracted and opened in Photos,
