@@ -42,7 +42,7 @@ External Elevations, Meters, Windows, Doors, Conservatory, Renewables,
 Mains Heating, Secondary Heating, Water Heating, Ventilation, Lighting.
 
 **Main Property section** (also protected), containing three sub-groups:
-Walls, Roof, Floor.
+Walls, Loft, Floor.
 
 **Extensions (clone of Main Property)**: a `+ Add extension` button beneath
 the Main Property section clones the three sub-groups into `Extension 1`,
@@ -84,7 +84,7 @@ workflow (camera capture, labels, reorder, export) is identical.
   PDF viewer), one section per group, and page numbers. Section sub-groups
   are indented under a section heading in the contents. Every group page
   shows the section-qualified name (`Main Property — Wall Thickness`,
-  `Extension 1 — Roof`, …).
+  `Extension 1 — Loft`, …).
 - **Download ZIP** — a single archive containing:
   - The full PDF report at the root.
   - Every stamped JPEG under a folder structure that mirrors the groups:

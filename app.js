@@ -23,7 +23,7 @@
 
   const BUILDING_SUBGROUPS = [
     { name: "Walls" },
-    { name: "Roof" },
+    { name: "Loft" },
     { name: "Floor" },
   ];
   const MAIN_SECTION = "Main Property";
@@ -433,9 +433,15 @@
     let changed = false;
 
     // Rename legacy sub-group names that have been updated in the defaults.
+    const subRenames = {
+      "wall thickness": "Walls",
+      roof: "Loft",
+    };
     for (const g of property.groups) {
-      if (g.section && (g.name || "").trim().toLowerCase() === "wall thickness") {
-        g.name = "Walls";
+      if (!g.section) continue;
+      const norm = (g.name || "").trim().toLowerCase();
+      if (subRenames[norm]) {
+        g.name = subRenames[norm];
         changed = true;
       }
     }
