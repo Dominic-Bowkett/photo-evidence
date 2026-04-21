@@ -84,8 +84,9 @@
 
     <template id="group-template">
       <article class="card group" data-group-id="">
-        <header class="group-header">
+        <header class="group-header" role="button" tabindex="0" aria-expanded="true">
           <div class="group-title-wrap">
+            <span class="group-chevron" aria-hidden="true">▾</span>
             <h2 class="group-title" contenteditable="true" spellcheck="false"></h2>
             <span class="group-count">0 photos</span>
           </div>

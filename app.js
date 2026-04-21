@@ -133,6 +133,7 @@
     currentId: null,
     property: null, // full active property { id, name, meta, groups }
     photos: new Map(), // photoId -> photo record
+    expanded: new Set(), // group ids currently expanded in the accordion
     gps: null,
     gpsWatchId: null,
   };
@@ -596,6 +597,7 @@
       saveProperty();
     }
 
+    initExpandedForProperty();
     renderMeta();
     renderGroups();
     renderPropertySelect();
@@ -624,6 +626,33 @@
   }
 
   // -------------------- Groups / photos rendering --------------------
+  function initExpandedForProperty() {
+    state.expanded.clear();
+    const ext = (state.property.groups || []).find(
+      (g) => !g.section && (g.name || "").toLowerCase() === "external elevations"
+    );
+    if (ext) state.expanded.add(ext.id);
+  }
+
+  function toggleGroup(group, node) {
+    const nowExpanded = !state.expanded.has(group.id);
+    if (nowExpanded) state.expanded.add(group.id);
+    else state.expanded.delete(group.id);
+    node.classList.toggle("collapsed", !nowExpanded);
+    const header = node.querySelector(".group-header");
+    if (header) header.setAttribute("aria-expanded", String(nowExpanded));
+  }
+
+  function expandGroup(group) {
+    state.expanded.add(group.id);
+    const node = els.groups.querySelector(`[data-group-id="${group.id}"]`);
+    if (node) {
+      node.classList.remove("collapsed");
+      const header = node.querySelector(".group-header");
+      if (header) header.setAttribute("aria-expanded", "true");
+    }
+  }
+
   function renderGroups() {
     els.groups.innerHTML = "";
 
@@ -698,6 +727,22 @@
   function renderGroup(group, container) {
     const node = els.groupTpl.content.firstElementChild.cloneNode(true);
     node.dataset.groupId = group.id;
+
+    const header = node.querySelector(".group-header");
+    const expanded = state.expanded.has(group.id);
+    if (!expanded) node.classList.add("collapsed");
+    header.setAttribute("aria-expanded", String(expanded));
+    header.addEventListener("click", (e) => {
+      if (e.target.closest("button, input, [contenteditable='true']")) return;
+      toggleGroup(group, node);
+    });
+    header.addEventListener("keydown", (e) => {
+      if (e.target !== header) return;
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        toggleGroup(group, node);
+      }
+    });
 
     const title = node.querySelector(".group-title");
     title.textContent = group.name;
@@ -836,6 +881,7 @@
   function addGroup(name) {
     const group = { id: uid("g"), name: name || "Untitled group", photoIds: [] };
     state.property.groups.push(group);
+    state.expanded.add(group.id);
     renderGroup(group);
     updateExportButton();
     saveProperty();
@@ -1022,6 +1068,8 @@
   }
 
   async function commitBufferedPhotos(group, photos) {
+    // Auto-expand the group so newly-captured thumbs are immediately visible.
+    expandGroup(group);
     for (const photo of photos) {
       photo.propertyId = state.property.id;
       photo.label = `${group.name} — ${group.photoIds.length + 1}`;
@@ -1633,6 +1681,7 @@
       state.property = makeNewProperty("Property 1");
       state.properties = [{ id: state.property.id, name: state.property.name }];
       state.currentId = state.property.id;
+      initExpandedForProperty();
       renderMeta();
       renderGroups();
       renderPropertySelect();

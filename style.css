@@ -365,6 +365,37 @@ input[type="date"]:focus {
   gap: 12px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 8px;
+  padding: 2px 0;
+}
+
+.group-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.group.collapsed .group-header {
+  margin-bottom: 0;
+}
+
+.group.collapsed .thumbs {
+  display: none;
+}
+
+.group-chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  transition: transform 0.18s ease;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.group.collapsed .group-chevron {
+  transform: rotate(-90deg);
 }
 
 .group-title-wrap {
