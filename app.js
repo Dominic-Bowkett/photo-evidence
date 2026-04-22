@@ -890,16 +890,54 @@
     // No Take photo / Upload / Remove buttons in virtual tag groups.
     const actions = node.querySelector(".group-actions");
     if (actions) actions.remove();
-    const addTile = node.querySelector(".thumb-add");
-    if (addTile) addTile.remove();
+
+    // Replace the flat thumbs grid with a stack of per-group clusters,
+    // each with its own heading and thumbs grid. Preserves the group
+    // context that the user is used to in Group view.
+    const oldThumbs = node.querySelector(".thumbs");
+    const clusters = document.createElement("div");
+    clusters.className = "tag-clusters";
+    oldThumbs.replaceWith(clusters);
 
     els.groups.appendChild(node);
 
-    for (const { group, photo } of entries) {
-      renderThumb(group, photo, {
-        containerGroupId: synthetic.id,
-        hint: group.name,
-      });
+    // Cluster entries by their real group, preserving the first-seen order
+    // so groups appear in the same sequence they have in the property list.
+    const byGroupId = new Map();
+    const groupOrder = [];
+    for (const entry of entries) {
+      const gid = entry.group.id;
+      if (!byGroupId.has(gid)) {
+        byGroupId.set(gid, { group: entry.group, items: [] });
+        groupOrder.push(gid);
+      }
+      byGroupId.get(gid).items.push(entry);
+    }
+
+    for (const gid of groupOrder) {
+      const { group, items } = byGroupId.get(gid);
+      const cluster = document.createElement("div");
+      cluster.className = "tag-cluster";
+
+      const clusterTitle = document.createElement("h3");
+      clusterTitle.className = "tag-cluster-title";
+      const countText = `${items.length} photo${items.length === 1 ? "" : "s"}`;
+      clusterTitle.innerHTML = `<span class="tag-cluster-name"></span> <span class="tag-cluster-count"></span>`;
+      clusterTitle.querySelector(".tag-cluster-name").textContent = group.name;
+      clusterTitle.querySelector(".tag-cluster-count").textContent = countText;
+      cluster.appendChild(clusterTitle);
+
+      const thumbs = document.createElement("div");
+      thumbs.className = "thumbs";
+      cluster.appendChild(thumbs);
+      clusters.appendChild(cluster);
+
+      for (const { photo } of items) {
+        renderThumb(group, photo, {
+          containerGroupId: synthetic.id,
+          thumbsEl: thumbs,
+        });
+      }
     }
     updateGroupCount(synthetic);
   }
@@ -984,7 +1022,9 @@
   function renderThumb(group, photo, opts) {
     const options = opts || {};
     const containerId = options.containerGroupId || group.id;
-    const thumbsEl = els.groups.querySelector(`[data-group-id="${containerId}"] .thumbs`);
+    const thumbsEl =
+      options.thumbsEl ||
+      els.groups.querySelector(`[data-group-id="${containerId}"] .thumbs`);
     if (!thumbsEl) return;
     const node = els.thumbTpl.content.firstElementChild.cloneNode(true);
     node.dataset.photoId = photo.id;
@@ -1622,27 +1662,82 @@
       doc.setLineWidth(0.2);
 
       // In tag layout, iterate the prebuilt entries (so we can see the source
-      // group) instead of plain photoIds.
-      const iterator = g.virtual
-        ? g.entries.map((e) => ({ photo: e.photo, source: e.source }))
-        : g.photoIds.map((pid) => ({ photo: state.photos.get(pid), source: g }));
+      // group) instead of plain photoIds. Sort the tag entries so photos from
+      // the same source group land together — the render loop emits a
+      // sub-heading when the source group changes.
+      let iterator;
+      if (g.virtual) {
+        const byGroup = new Map();
+        const order = [];
+        for (const e of g.entries) {
+          if (!byGroup.has(e.source.id)) {
+            byGroup.set(e.source.id, []);
+            order.push(e.source.id);
+          }
+          byGroup.get(e.source.id).push(e);
+        }
+        iterator = [];
+        for (const sid of order) {
+          for (const e of byGroup.get(sid)) {
+            iterator.push({ photo: e.photo, source: e.source });
+          }
+        }
+      } else {
+        iterator = g.photoIds.map((pid) => ({
+          photo: state.photos.get(pid),
+          source: g,
+        }));
+      }
 
       let cursorY = margin + 32;
       let index = 0;
+      let lastSourceGroupId = null;
+      let groupIndex = 0;
       for (const entry of iterator) {
         const photo = entry.photo;
         const sourceGroup = entry.source;
         if (!photo) continue;
+
+        // In tag layout, print a group sub-heading before the first photo
+        // of each source group cluster so the reader still sees "Walls",
+        // "Loft", etc. as a heading above the grid.
+        if (layout === "tag" && sourceGroup.id !== lastSourceGroupId) {
+          // Space budget: if the heading plus a reasonable photo won't
+          // fit on this page, break first.
+          if (cursorY + 200 > pageH - margin) {
+            doc.addPage();
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(12);
+            doc.text(`${displayName} (cont.)`, margin, margin - 8);
+            cursorY = margin;
+          }
+          cursorY += groupIndex === 0 ? 0 : 8;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(12);
+          doc.setTextColor(11, 61, 46);
+          doc.text(sourceGroup.name, margin, cursorY);
+          doc.setDrawColor(190);
+          doc.setLineWidth(0.4);
+          doc.line(margin, cursorY + 3, pageW - margin, cursorY + 3);
+          doc.setLineWidth(0.2);
+          doc.setTextColor(0);
+          cursorY += 14;
+          lastSourceGroupId = sourceGroup.id;
+          groupIndex += 1;
+          index = 0; // restart photo numbering within each group cluster
+        }
+
         index += 1;
         const isUpload = photo.source === "upload";
         const building = BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
-        // In group layout, prefix non-Main tags. In tag layout, prefix with
-        // the source group name so the reader knows which group it came from.
-        const prefix = layout === "tag"
-          ? `${sourceGroup.name} — `
-          : building !== DEFAULT_BUILDING
-            ? `[${building}] `
-            : "";
+        // In group layout, prefix non-Main tags. In tag layout the sub-heading
+        // above already states the source group, so we omit the group prefix.
+        const prefix =
+          layout === "tag"
+            ? ""
+            : building !== DEFAULT_BUILDING
+              ? `[${building}] `
+              : "";
         const labelText = `${index}. ${prefix}${photo.label || sourceGroup.name}`;
         // Captions: single line for camera captures, a 3-line stack for
         // uploaded photos so Captured / Location / Uploaded each get their own line.
@@ -2033,40 +2128,69 @@
     }
     tocHtml += "</ul>";
 
+    // Helper: build one figure's HTML.
+    const figureHtml = (photo, source, index) => {
+      const path = photoPaths.get(photo.id) || "";
+      const building = photoBuildingOf(photo);
+      const hrefEsc = escapeHtml(path);
+      const label = `${index}. ${photo.label || source.name}`;
+      const labelEsc = escapeHtml(label);
+      const tagClass = building === DEFAULT_BUILDING ? "tag tag-main" : "tag tag-ext";
+      let html = `<figure>`;
+      html += `<a href="${hrefEsc}" target="_blank" rel="noopener"><img src="${hrefEsc}" alt="${labelEsc}" loading="lazy"></a>`;
+      html += `<figcaption><div class="label"><span class="${tagClass}">${escapeHtml(building)}</span> ${labelEsc}</div>`;
+      if (photo.source === "upload") {
+        html += `<div class="meta-line">Date taken: ${escapeHtml(fmtIso(photo.takenAt))}</div>`;
+        html += `<div class="meta-line">Location taken: ${escapeHtml(photo.gps ? formatGps(photo.gps) : "not in photo metadata")}</div>`;
+        html += `<div class="meta-line">Uploaded: ${escapeHtml(fmtIso(photo.uploadedAt))}</div>`;
+      } else {
+        const parts = [];
+        if (photo.takenAt) parts.push(new Date(photo.takenAt).toLocaleString());
+        if (photo.gps) parts.push(formatGps(photo.gps));
+        if (parts.length) html += `<div class="meta-line">${escapeHtml(parts.join("  ·  "))}</div>`;
+      }
+      html += `<a class="open-link" href="${hrefEsc}" target="_blank" rel="noopener">Open photo →</a>`;
+      html += `</figcaption></figure>`;
+      return html;
+    };
+
     // Section bodies with photo figures.
     let sectionsHtml = "";
     for (const s of sections) {
-      sectionsHtml += `<section id="g-${escapeHtml(s.id)}" class="group"><h2>${escapeHtml(s.name)}</h2><div class="photos">`;
-      let index = 0;
-      for (const { photo, source } of s.entries) {
-        index += 1;
-        const path = photoPaths.get(photo.id) || "";
-        const building = photoBuildingOf(photo);
-        const hrefEsc = escapeHtml(path);
-        // Label: in tag layout prefix the source group, in group layout use the photo label.
-        const baseLabel = layout === "tag"
-          ? `${source.name} — ${photo.label || ""}`.trim().replace(/— $/, "")
-          : (photo.label || source.name);
-        const label = `${index}. ${baseLabel}`;
-        const labelEsc = escapeHtml(label);
-        const tagClass = building === DEFAULT_BUILDING ? "tag tag-main" : "tag tag-ext";
-        sectionsHtml += `<figure>`;
-        sectionsHtml += `<a href="${hrefEsc}" target="_blank" rel="noopener"><img src="${hrefEsc}" alt="${labelEsc}" loading="lazy"></a>`;
-        sectionsHtml += `<figcaption><div class="label"><span class="${tagClass}">${escapeHtml(building)}</span> ${labelEsc}</div>`;
-        if (photo.source === "upload") {
-          sectionsHtml += `<div class="meta-line">Date taken: ${escapeHtml(fmtIso(photo.takenAt))}</div>`;
-          sectionsHtml += `<div class="meta-line">Location taken: ${escapeHtml(photo.gps ? formatGps(photo.gps) : "not in photo metadata")}</div>`;
-          sectionsHtml += `<div class="meta-line">Uploaded: ${escapeHtml(fmtIso(photo.uploadedAt))}</div>`;
-        } else {
-          const parts = [];
-          if (photo.takenAt) parts.push(new Date(photo.takenAt).toLocaleString());
-          if (photo.gps) parts.push(formatGps(photo.gps));
-          if (parts.length) sectionsHtml += `<div class="meta-line">${escapeHtml(parts.join("  ·  "))}</div>`;
+      sectionsHtml += `<section id="g-${escapeHtml(s.id)}" class="group"><h2>${escapeHtml(s.name)}</h2>`;
+      if (layout === "tag") {
+        // Cluster the tag's photos by their source group so the reader still
+        // sees a group heading above each cluster of photos.
+        const byGroup = new Map();
+        const order = [];
+        for (const entry of s.entries) {
+          const gid = entry.source.id;
+          if (!byGroup.has(gid)) {
+            byGroup.set(gid, { group: entry.source, items: [] });
+            order.push(gid);
+          }
+          byGroup.get(gid).items.push(entry);
         }
-        sectionsHtml += `<a class="open-link" href="${hrefEsc}" target="_blank" rel="noopener">Open photo →</a>`;
-        sectionsHtml += `</figcaption></figure>`;
+        for (const gid of order) {
+          const { group: src, items } = byGroup.get(gid);
+          sectionsHtml += `<div class="tag-cluster-html"><h3 class="tag-cluster-title-html">${escapeHtml(src.name)} <span class="tag-cluster-count-html">${items.length} photo${items.length === 1 ? "" : "s"}</span></h3><div class="photos">`;
+          let index = 0;
+          for (const { photo, source } of items) {
+            index += 1;
+            sectionsHtml += figureHtml(photo, source, index);
+          }
+          sectionsHtml += `</div></div>`;
+        }
+      } else {
+        sectionsHtml += `<div class="photos">`;
+        let index = 0;
+        for (const { photo, source } of s.entries) {
+          index += 1;
+          sectionsHtml += figureHtml(photo, source, index);
+        }
+        sectionsHtml += `</div>`;
       }
-      sectionsHtml += `</div></section>`;
+      sectionsHtml += `</section>`;
     }
 
     // Top-of-page link to the sibling layout.
@@ -2097,6 +2221,10 @@ header.cover h1{margin:0 0 8px;font-size:1.35rem}
 .toc .count{color:#5b6b65;font-size:0.85rem;margin-left:6px}
 .total{margin:10px 0 0;font-weight:700;font-size:0.95rem;color:#0b3d2e}
 .photos{display:grid;grid-template-columns:1fr;gap:16px}
+.tag-cluster-html{margin:12px 0 18px}
+.tag-cluster-html:first-of-type{margin-top:0}
+.tag-cluster-title-html{margin:0 0 10px;font-size:0.85rem;font-weight:700;color:#0b3d2e;text-transform:uppercase;letter-spacing:0.5px;padding:0 0 4px;border-bottom:1px solid #d6e3dc;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tag-cluster-count-html{font-weight:500;color:#5b6b65;font-size:0.78rem;text-transform:none;letter-spacing:normal}
 @media (min-width:720px){.photos{grid-template-columns:1fr 1fr}}
 figure{margin:0;border:1px solid #eef3f0;border-radius:10px;overflow:hidden;background:#fff;display:flex;flex-direction:column}
 figure img{display:block;width:100%;height:auto;background:#000}

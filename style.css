@@ -304,6 +304,39 @@ input[type="date"]:focus {
   gap: 16px;
 }
 
+.tag-clusters {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tag-cluster-title {
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #d6e3dc;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tag-cluster-count {
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.group.collapsed .tag-clusters {
+  display: none;
+}
+
 .group-title-locked {
   color: var(--ink);
   background: transparent;
