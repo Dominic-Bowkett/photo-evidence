@@ -196,6 +196,11 @@ input[type="date"]:focus {
   border-color: #c7e3d3;
 }
 
+.btn-upload {
+  --btn-bg: #eef1ef;
+  --btn-ink: var(--ink);
+}
+
 .btn-danger-ghost {
   --btn-bg: transparent;
   --btn-ink: var(--danger);

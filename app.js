@@ -357,11 +357,123 @@
     const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
     return {
       id: uid("p"),
+      source: "camera",
       dataUrl,
       width: w,
       height: h,
       takenAt: stampDate.toISOString(),
       gps: state.gps ? { ...state.gps } : null,
+      label: "",
+    };
+  }
+
+  // -------------------- Upload / EXIF read helpers --------------------
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+  }
+
+  function dmsToDeg(arr) {
+    if (!Array.isArray(arr) || arr.length !== 3) return null;
+    try {
+      const [[dN, dD], [mN, mD], [sN, sD]] = arr;
+      return dN / dD + mN / mD / 60 + sN / sD / 3600;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function parseExifDateTime(str) {
+    if (!str || typeof str !== "string") return null;
+    const m = str.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return null;
+    const [, y, mo, d, h, mi, s] = m;
+    const date = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`);
+    return isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  function readExifFromDataUrl(dataUrl) {
+    if (typeof piexif === "undefined") return { takenAt: null, gps: null, rawExif: null };
+    try {
+      const exif = piexif.load(dataUrl);
+      const dtStr =
+        (exif.Exif && exif.Exif[piexif.ExifIFD.DateTimeOriginal]) ||
+        (exif.Exif && exif.Exif[piexif.ExifIFD.DateTimeDigitized]) ||
+        (exif["0th"] && exif["0th"][piexif.ImageIFD.DateTime]) ||
+        null;
+      const takenAt = parseExifDateTime(dtStr);
+
+      let gps = null;
+      if (exif.GPS && exif.GPS[piexif.GPSIFD.GPSLatitude] && exif.GPS[piexif.GPSIFD.GPSLongitude]) {
+        const lat = dmsToDeg(exif.GPS[piexif.GPSIFD.GPSLatitude]);
+        const lon = dmsToDeg(exif.GPS[piexif.GPSIFD.GPSLongitude]);
+        if (lat != null && lon != null) {
+          const latRef = exif.GPS[piexif.GPSIFD.GPSLatitudeRef] || "N";
+          const lonRef = exif.GPS[piexif.GPSIFD.GPSLongitudeRef] || "E";
+          gps = {
+            latitude: latRef === "S" ? -lat : lat,
+            longitude: lonRef === "W" ? -lon : lon,
+            accuracy: null,
+          };
+        }
+      }
+
+      let rawExif = null;
+      try {
+        rawExif = piexif.dump(exif);
+      } catch (_) {
+        rawExif = null;
+      }
+      return { takenAt, gps, rawExif };
+    } catch (err) {
+      return { takenAt: null, gps: null, rawExif: null };
+    }
+  }
+
+  async function processUploadedFile(file) {
+    const originalDataUrl = await readFileAsDataUrl(file);
+    const { takenAt, gps, rawExif } = readExifFromDataUrl(originalDataUrl);
+
+    const img = await loadImage(file);
+    const longest = Math.max(img.naturalWidth, img.naturalHeight);
+    const scale = longest > MAX_DIMENSION ? MAX_DIMENSION / longest : 1;
+
+    let dataUrl = originalDataUrl;
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+
+    if (scale < 1) {
+      w = Math.round(img.naturalWidth * scale);
+      h = Math.round(img.naturalHeight * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+      if (rawExif) {
+        try {
+          dataUrl = piexif.insert(rawExif, dataUrl);
+        } catch (_) {
+          /* fall back to no-exif resized copy */
+        }
+      }
+    }
+
+    return {
+      id: uid("p"),
+      source: "upload",
+      dataUrl,
+      width: w,
+      height: h,
+      takenAt, // from EXIF, may be null
+      gps, // from EXIF, may be null
+      uploadedAt: new Date().toISOString(),
+      originalName: file.name || "",
       label: "",
     };
   }
@@ -784,6 +896,15 @@
       btn.addEventListener("click", () => openCamera(group));
     });
 
+    const uploadInput = node.querySelector(".file-input-upload");
+    if (uploadInput) {
+      uploadInput.addEventListener("change", async (e) => {
+        const files = Array.from(e.target.files || []);
+        uploadInput.value = "";
+        if (files.length) await addUploadedPhotos(group, files);
+      });
+    }
+
     const removeBtn = node.querySelector(".btn-remove-group");
     if (group.protected) {
       removeBtn.remove();
@@ -864,22 +985,26 @@
     else thumbsEl.appendChild(node);
   }
 
-  async function addPhotos(group, files) {
+  async function addUploadedPhotos(group, files) {
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (!imageFiles.length) {
       toast("Please select image files.", "err");
       return;
     }
-    if (!state.gps) toast("Tip: enable GPS for geolocation stamps.");
-    toast(`Processing ${imageFiles.length} photo${imageFiles.length === 1 ? "" : "s"}…`);
+    toast(`Uploading ${imageFiles.length} photo${imageFiles.length === 1 ? "" : "s"}…`);
 
+    // Make sure the receiving group is visible so the new thumbs appear.
+    expandGroup(group);
+
+    let missingExifCount = 0;
     for (const file of imageFiles) {
       try {
-        const photo = await processFile(file);
+        const photo = await processUploadedFile(file);
         photo.propertyId = state.property.id;
         photo.label = `${group.name} — ${group.photoIds.length + 1}`;
         state.photos.set(photo.id, photo);
         group.photoIds.push(photo.id);
+        if (!photo.takenAt || !photo.gps) missingExifCount += 1;
         await savePhotoNow(photo);
         renderThumb(group, photo);
         updateGroupCount(group);
@@ -890,6 +1015,13 @@
     }
     updateExportButton();
     saveProperty();
+    if (missingExifCount) {
+      toast(
+        `${missingExifCount} upload${missingExifCount === 1 ? "" : "s"} missing date/GPS in metadata — shown as “not in photo metadata” in the PDF.`
+      );
+    } else {
+      toast(`Uploaded ${imageFiles.length} photo${imageFiles.length === 1 ? "" : "s"}.`);
+    }
   }
 
   function addGroup(name) {
@@ -1303,8 +1435,11 @@
         const photo = state.photos.get(pid);
         if (!photo) continue;
         index += 1;
+        const isUpload = photo.source === "upload";
         const labelText = `${index}. ${photo.label || g.name}`;
-        const capH = 16;
+        // Captions: single line for camera captures, a 3-line stack for
+        // uploaded photos so Captured / Location / Uploaded each get their own line.
+        const capH = isUpload ? 58 : 16;
         const maxImgW = pageW - margin * 2;
         const maxImgH = pageH - cursorY - margin - capH - 10;
 
@@ -1344,12 +1479,29 @@
         doc.setTextColor(40);
         doc.text(labelText, margin, cursorY + drawH + 14);
 
-        const stampLine = [];
-        if (photo.takenAt) stampLine.push(new Date(photo.takenAt).toLocaleString());
-        if (photo.gps) stampLine.push(formatGps(photo.gps));
-        if (stampLine.length) {
+        if (isUpload) {
+          doc.setFontSize(9);
           doc.setTextColor(110);
-          doc.text(stampLine.join("   ·   "), pageW - margin, cursorY + drawH + 14, { align: "right" });
+          const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : "not in photo metadata");
+          const uploadLines = [
+            `Date taken: ${fmt(photo.takenAt)}`,
+            `Location taken: ${photo.gps ? formatGps(photo.gps) : "not in photo metadata"}`,
+            `Uploaded: ${fmt(photo.uploadedAt)}`,
+          ];
+          let infoY = cursorY + drawH + 28;
+          for (const line of uploadLines) {
+            doc.text(line, margin, infoY);
+            infoY += 12;
+          }
+          doc.setFontSize(10);
+        } else {
+          const stampLine = [];
+          if (photo.takenAt) stampLine.push(new Date(photo.takenAt).toLocaleString());
+          if (photo.gps) stampLine.push(formatGps(photo.gps));
+          if (stampLine.length) {
+            doc.setTextColor(110);
+            doc.text(stampLine.join("   ·   "), pageW - margin, cursorY + drawH + 14, { align: "right" });
+          }
         }
         doc.setTextColor(0);
 
@@ -1532,11 +1684,19 @@
           const photo = state.photos.get(pid);
           if (!photo) continue;
           index += 1;
-          const stampedDataUrl = buildExifDataUrl(photo);
+          // Camera captures: inject EXIF date / GPS into the freshly-stamped JPEG.
+          // Uploads: keep the original bytes so the user's original EXIF
+          // (camera model, settings, lens, etc.) is preserved as-is.
+          const stampedDataUrl =
+            photo.source === "upload" ? photo.dataUrl : buildExifDataUrl(photo);
           const bytes = dataUrlToBytes(stampedDataUrl);
           const label = slugify(photo.label || `${g.name}-${index}`);
           const name = `${String(index).padStart(2, "0")}_${label}.jpg`;
-          const entryDate = photo.takenAt ? new Date(photo.takenAt) : new Date();
+          const entryDate = photo.takenAt
+            ? new Date(photo.takenAt)
+            : photo.uploadedAt
+              ? new Date(photo.uploadedAt)
+              : new Date();
           folder.file(name, bytes, { date: entryDate });
         }
       }
