@@ -149,7 +149,6 @@
     gpsDot: document.getElementById("gps-dot"),
     gpsLabel: document.getElementById("gps-label"),
     exportBtn: document.getElementById("btn-export"),
-    exportZipBtn: document.getElementById("btn-export-zip"),
     exportPhotosBtn: document.getElementById("btn-export-photos"),
     exportPhotosDialog: document.getElementById("export-photos-dialog"),
     exportPhotosBackdrop: document.getElementById("export-photos-backdrop"),
@@ -1069,7 +1068,6 @@
   function updateExportButton() {
     const disabled = !state.property || !state.property.groups.some((g) => g.photoIds.length > 0);
     els.exportBtn.disabled = disabled;
-    els.exportZipBtn.disabled = disabled;
     els.exportPhotosBtn.disabled = disabled;
   }
 
@@ -1662,64 +1660,6 @@
     }
   }
 
-  async function exportZip() {
-    if (typeof JSZip === "undefined") {
-      toast("ZIP library failed to load.", "err");
-      return;
-    }
-    try {
-      toast("Building ZIP…");
-      const { doc, filename: pdfName } = await buildPdf();
-      const pdfBlob = doc.output("blob");
-
-      const zip = new JSZip();
-      zip.file(pdfName, pdfBlob);
-
-      const groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
-      const usedGroupDirs = new Map();
-      for (const g of groupsWithPhotos) {
-        const parts = [];
-        if (g.section) parts.push(slugify(g.section));
-        parts.push(slugify(g.name));
-        let dir = parts.join("/");
-        const n = (usedGroupDirs.get(dir) || 0) + 1;
-        usedGroupDirs.set(dir, n);
-        if (n > 1) dir = `${dir}-${n}`;
-        const folder = zip.folder(dir);
-
-        let index = 0;
-        for (const pid of g.photoIds) {
-          const photo = state.photos.get(pid);
-          if (!photo) continue;
-          index += 1;
-          // Camera captures: inject EXIF date / GPS into the freshly-stamped JPEG.
-          // Uploads: keep the original bytes so the user's original EXIF
-          // (camera model, settings, lens, etc.) is preserved as-is.
-          const stampedDataUrl =
-            photo.source === "upload" ? photo.dataUrl : buildExifDataUrl(photo);
-          const bytes = dataUrlToBytes(stampedDataUrl);
-          const label = slugify(photo.label || `${g.name}-${index}`);
-          const name = `${String(index).padStart(2, "0")}_${label}.jpg`;
-          const entryDate = photo.takenAt
-            ? new Date(photo.takenAt)
-            : photo.uploadedAt
-              ? new Date(photo.uploadedAt)
-              : new Date();
-          folder.file(name, bytes, { date: entryDate });
-        }
-      }
-
-      const zipBlob = await zip.generateAsync({
-        type: "blob",
-        compression: "STORE", // JPEGs don't compress; skip to keep it fast.
-      });
-      saveBlob(zipBlob, `${reportBaseName()}.zip`);
-      toast("ZIP saved.");
-    } catch (err) {
-      console.error(err);
-      toast(err.message || "Failed to build ZIP.", "err");
-    }
-  }
 
   // -------------------- Export photos (share or photos-only ZIP) --------------------
   function photoExportItems() {
@@ -1918,10 +1858,6 @@
 
   els.exportBtn.addEventListener("click", () => {
     exportPdf();
-  });
-
-  els.exportZipBtn.addEventListener("click", () => {
-    exportZip();
   });
 
   els.exportPhotosBtn.addEventListener("click", () => {
