@@ -74,28 +74,50 @@ capture, uploads, labels, reorder, exports, building tag) is identical.
 
 ### Per-photo controls
 - Default label `"{Group} — {n}"`, editable inline.
-- Drag thumbnails to reorder them within a group.
+- Drag thumbnails to reorder them within a group (disabled in *By tag* view).
 - × button deletes a photo after a confirm naming the photo and its group.
+- **Tap any photo** to open a full-screen lightbox. Prev / Next buttons and
+  the ← / → keys step through the surrounding set; Esc or tap outside to
+  close.
+- **Building tag select** above each thumb (`Main / Ext1 / Ext2 / Ext3 /
+  Ext4`) decides which building the photo belongs to.
+
+### View toggle
+Above the groups list, a two-button toggle switches between:
+- **By group** — the default app layout: one accordion per group
+  (External Elevations, Meters, …, Walls, Loft, Floor). *Take photo /
+  Upload / Remove / drag-reorder* all live here.
+- **By tag** — photos re-bucketed under accordions for each building tag
+  that actually has photos (`Main`, `Ext1`, …). Each thumb shows its
+  source group as a small hint. Changing a photo's tag from this view
+  re-categorises the thumb instantly.
 
 ### Exports
-- **Download PDF** — cover page with the job metadata, a **clickable
-  contents page** (each row is a link to that section, page numbers shown
-  as `p. N`, with PDF bookmarks as a guaranteed-clickable fallback in any
-  PDF viewer), one section per group, and page numbers. Section sub-groups
-  are indented under a section heading in the contents. Every group page
-  shows the section-qualified name (`Main Property — Wall Thickness`,
-  `Extension 1 — Loft`, …).
-- **Download ZIP** — a single archive containing:
-  - The full PDF report at the root.
-  - Every stamped JPEG under a folder structure that mirrors the groups:
-    `main-property/walls/01_front-wall-north.jpg`, etc.
-  - **EXIF `DateTimeOriginal`, `DateTimeDigitized`, `DateTime`, GPS
-    lat/lon, `GPSDateStamp`, `GPSTimeStamp`** written into each JPEG
-    via piexifjs, so when the files are extracted and opened in Photos,
-    Finder, Explorer, Google Photos, etc. the capture date and location
-    are recognised automatically.
-  - Zip entry modification times are also set to each photo's capture
-    timestamp as a secondary hint.
+- **Download PDF** — opens a small popup to pick the layout:
+  - *By group* (matches the app's default view)
+  - *By tag* — one PDF section per building (Main / Ext1–4), each
+    photo's label prefixed with its source group (`Walls — Front wall`).
+
+  Both layouts include a cover page, a **clickable contents page**
+  (blue-underlined entries linking to each section, with PDF bookmarks as a
+  universally-clickable fallback) and page numbers.
+- **Export photos** — opens a popup with two options:
+  - *Save to Photos* — share sheet for copying the whole batch to the
+    device camera roll (iOS / Android with Web Share).
+  - *Download ZIP* — a single archive containing:
+    - Photo folders (one per group): `walls/01_front-wall-north.jpg`, etc.
+    - **Two PDF reports** — `..._by-group.pdf` and `..._by-tag.pdf` — both
+      with their embedded photos hyperlinked to the corresponding
+      full-resolution JPEGs in the archive.
+    - **Two HTML indices** — `index.html` (by group) and `index-by-tag.html`
+      (by tag). Each has a small banner at the top linking to the other
+      layout, references the photo files via `<img src="…">` so the
+      HTML file itself stays small, and works offline in any browser.
+    - **EXIF `DateTimeOriginal`, `DateTimeDigitized`, `DateTime`, GPS
+      lat/lon, `GPSDateStamp`, `GPSTimeStamp`** written into each
+      camera-captured JPEG via piexifjs; uploaded JPEGs ship with their
+      original EXIF intact. Zip entry modification times also reflect
+      each photo's capture / upload time.
 
 ## Run locally
 

@@ -64,6 +64,11 @@
         </div>
       </section>
 
+      <div class="view-toggle" role="tablist" aria-label="Photo layout">
+        <button class="view-toggle-btn is-active" data-view="group" role="tab" aria-selected="true" type="button">By group</button>
+        <button class="view-toggle-btn" data-view="tag" role="tab" aria-selected="false" type="button">By tag</button>
+      </div>
+
       <section id="groups" class="groups" aria-label="Photo groups"></section>
 
       <div class="add-group-row">
@@ -112,16 +117,19 @@
 
     <template id="thumb-template">
       <figure class="thumb" draggable="true">
+        <div class="thumb-tagbar">
+          <select class="thumb-building" aria-label="Building tag">
+            <option value="Main">Main</option>
+            <option value="Ext1">Ext1</option>
+            <option value="Ext2">Ext2</option>
+            <option value="Ext3">Ext3</option>
+            <option value="Ext4">Ext4</option>
+          </select>
+          <span class="thumb-group-hint"></span>
+        </div>
         <img alt="" />
         <figcaption>
           <div class="thumb-row">
-            <select class="thumb-building" aria-label="Building tag">
-              <option value="Main">Main</option>
-              <option value="Ext1">Ext1</option>
-              <option value="Ext2">Ext2</option>
-              <option value="Ext3">Ext3</option>
-              <option value="Ext4">Ext4</option>
-            </select>
             <input type="text" class="thumb-label" placeholder="Label" />
             <button type="button" class="thumb-remove" title="Remove photo" aria-label="Remove photo">&times;</button>
           </div>
@@ -130,6 +138,35 @@
     </template>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="lightbox" class="lightbox" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Photo viewer">
+      <button class="lightbox-btn lightbox-close" type="button" aria-label="Close">&times;</button>
+      <button class="lightbox-btn lightbox-prev" type="button" aria-label="Previous photo">&#x2039;</button>
+      <div class="lightbox-stage">
+        <img id="lightbox-img" alt="" />
+      </div>
+      <button class="lightbox-btn lightbox-next" type="button" aria-label="Next photo">&#x203A;</button>
+      <div class="lightbox-caption" id="lightbox-caption"></div>
+    </div>
+
+    <div id="pdf-layout-dialog" class="dialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="pdf-layout-title">
+      <div class="dialog-backdrop" id="pdf-layout-backdrop"></div>
+      <div class="dialog-card">
+        <h2 id="pdf-layout-title">Download PDF</h2>
+        <p>Choose how the photos are organised in the report.</p>
+        <div class="dialog-actions">
+          <button class="btn btn-primary" id="pdf-layout-group" type="button">By group</button>
+          <button class="btn" id="pdf-layout-tag" type="button">By tag (Main / Ext1–4)</button>
+        </div>
+        <p class="dialog-help">
+          <strong>By group</strong> lists photos under External Elevations, Meters,
+          Walls, etc. — the same order as the app.
+          <strong>By tag</strong> groups photos by building (Main, Ext1–Ext4),
+          with the original group shown as a subtitle.
+        </p>
+        <button class="btn btn-ghost-dark" id="pdf-layout-cancel" type="button">Cancel</button>
+      </div>
+    </div>
 
     <div id="export-photos-dialog" class="dialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="export-photos-title">
       <div class="dialog-backdrop" id="export-photos-backdrop"></div>

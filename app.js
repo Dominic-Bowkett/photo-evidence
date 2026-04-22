@@ -139,6 +139,7 @@
     property: null, // full active property { id, name, meta, groups }
     photos: new Map(), // photoId -> photo record
     expanded: new Set(), // group ids currently expanded in the accordion
+    view: "group", // "group" | "tag"
     gps: null,
     gpsWatchId: null,
   };
@@ -161,6 +162,18 @@
     exportPhotosZipBtn: document.getElementById("export-photos-zip"),
     exportPhotosCancelBtn: document.getElementById("export-photos-cancel"),
     exportPhotosHelp: document.getElementById("export-photos-help"),
+    pdfLayoutDialog: document.getElementById("pdf-layout-dialog"),
+    pdfLayoutBackdrop: document.getElementById("pdf-layout-backdrop"),
+    pdfLayoutGroupBtn: document.getElementById("pdf-layout-group"),
+    pdfLayoutTagBtn: document.getElementById("pdf-layout-tag"),
+    pdfLayoutCancelBtn: document.getElementById("pdf-layout-cancel"),
+    viewToggleBtns: Array.from(document.querySelectorAll(".view-toggle-btn")),
+    lightbox: document.getElementById("lightbox"),
+    lightboxImg: document.getElementById("lightbox-img"),
+    lightboxCaption: document.getElementById("lightbox-caption"),
+    lightboxCloseBtn: document.querySelector(".lightbox-close"),
+    lightboxPrevBtn: document.querySelector(".lightbox-prev"),
+    lightboxNextBtn: document.querySelector(".lightbox-next"),
     toast: document.getElementById("toast"),
     propSelect: document.getElementById("property-select"),
     newPropBtn: document.getElementById("btn-new-property"),
@@ -760,10 +773,35 @@
   // -------------------- Groups / photos rendering --------------------
   function initExpandedForProperty() {
     state.expanded.clear();
-    const ext = (state.property.groups || []).find(
-      (g) => !g.section && (g.name || "").toLowerCase() === "external elevations"
-    );
-    if (ext) state.expanded.add(ext.id);
+    if (state.view === "tag") {
+      for (const t of BUILDING_TAGS) state.expanded.add(tagGroupId(t));
+    } else {
+      const ext = (state.property.groups || []).find(
+        (g) => !g.section && (g.name || "").toLowerCase() === "external elevations"
+      );
+      if (ext) state.expanded.add(ext.id);
+    }
+  }
+
+  function tagGroupId(tag) {
+    return `tag-${tag}`;
+  }
+
+  function photoBuildingOf(photo) {
+    return BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
+  }
+
+  function setView(view) {
+    if (view !== "group" && view !== "tag") return;
+    if (state.view === view) return;
+    state.view = view;
+    for (const btn of els.viewToggleBtns) {
+      const active = btn.dataset.view === view;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-selected", String(active));
+    }
+    initExpandedForProperty();
+    renderGroups();
   }
 
   function toggleGroup(group, node) {
@@ -787,9 +825,80 @@
 
   function renderGroups() {
     els.groups.innerHTML = "";
-    for (const group of state.property.groups) {
-      renderGroup(group, els.groups);
+    if (state.view === "tag") {
+      renderByTag();
+    } else {
+      for (const group of state.property.groups) {
+        renderGroup(group, els.groups);
+      }
     }
+  }
+
+  function renderByTag() {
+    // Bucket every photo by its building tag, tracking the originating group
+    // so the thumb can still show a hint and delete/reorder correctly.
+    const buckets = new Map();
+    for (const t of BUILDING_TAGS) buckets.set(t, []);
+    for (const group of state.property.groups) {
+      for (const pid of group.photoIds) {
+        const photo = state.photos.get(pid);
+        if (!photo) continue;
+        buckets.get(photoBuildingOf(photo)).push({ group, photo });
+      }
+    }
+    for (const tag of BUILDING_TAGS) {
+      const entries = buckets.get(tag);
+      if (!entries.length) continue;
+      const synthetic = {
+        id: tagGroupId(tag),
+        name: tag,
+        photoIds: entries.map((e) => e.photo.id),
+        protected: true,
+        virtual: true,
+        tag,
+      };
+      renderTagGroup(synthetic, entries);
+    }
+  }
+
+  function renderTagGroup(synthetic, entries) {
+    const node = els.groupTpl.content.firstElementChild.cloneNode(true);
+    node.dataset.groupId = synthetic.id;
+    node.classList.add("group-virtual");
+
+    const header = node.querySelector(".group-header");
+    const expanded = state.expanded.has(synthetic.id);
+    if (!expanded) node.classList.add("collapsed");
+    header.setAttribute("aria-expanded", String(expanded));
+    header.addEventListener("click", (e) => {
+      if (e.target.closest("button, input, [contenteditable='true']")) return;
+      toggleGroup(synthetic, node);
+    });
+    header.addEventListener("keydown", (e) => {
+      if (e.target !== header) return;
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        toggleGroup(synthetic, node);
+      }
+    });
+
+    const title = node.querySelector(".group-title");
+    title.textContent = synthetic.name;
+    title.setAttribute("contenteditable", "false");
+    title.classList.add("group-title-locked");
+
+    // No Take photo / Upload / Remove buttons in virtual tag groups.
+    const actions = node.querySelector(".group-actions");
+    if (actions) actions.remove();
+    const addTile = node.querySelector(".thumb-add");
+    if (addTile) addTile.remove();
+
+    els.groups.appendChild(node);
+
+    for (const { group, photo } of entries) {
+      renderThumb(group, photo, { hint: group.name });
+    }
+    updateGroupCount(synthetic);
   }
 
   function renderGroup(group, container) {
@@ -869,14 +978,24 @@
     node.textContent = `${n} photo${n === 1 ? "" : "s"}`;
   }
 
-  function renderThumb(group, photo) {
-    const thumbsEl = els.groups.querySelector(`[data-group-id="${group.id}"] .thumbs`);
+  function renderThumb(group, photo, opts) {
+    const options = opts || {};
+    const containerId = options.containerGroupId || group.id;
+    const thumbsEl = els.groups.querySelector(`[data-group-id="${containerId}"] .thumbs`);
     if (!thumbsEl) return;
     const node = els.thumbTpl.content.firstElementChild.cloneNode(true);
     node.dataset.photoId = photo.id;
     const img = node.querySelector("img");
     img.src = photo.dataUrl;
     img.alt = photo.label;
+    img.addEventListener("click", () => openLightbox(group, photo));
+
+    const hint = node.querySelector(".thumb-group-hint");
+    if (hint) {
+      if (options.hint) hint.textContent = options.hint;
+      else hint.remove();
+    }
+
     const labelInput = node.querySelector(".thumb-label");
     labelInput.value = photo.label || "";
 
@@ -897,6 +1016,10 @@
       buildingSelect.addEventListener("change", () => {
         photo.building = buildingSelect.value;
         savePhotoNow(photo).catch((err) => console.warn("Failed to save building tag", err));
+        if (state.view === "tag") {
+          // Re-categorise so the thumb moves into the right bucket.
+          renderGroups();
+        }
       });
     }
 
@@ -915,25 +1038,32 @@
         console.error(err);
       }
       saveProperty();
+      if (state.view === "tag") renderGroups();
     });
 
-    node.addEventListener("dragstart", () => node.classList.add("dragging"));
-    node.addEventListener("dragend", () => node.classList.remove("dragging"));
-    node.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      const dragging = thumbsEl.querySelector(".thumb.dragging");
-      if (!dragging || dragging === node) return;
-      const rect = node.getBoundingClientRect();
-      const before = e.clientY < rect.top + rect.height / 2;
-      thumbsEl.insertBefore(dragging, before ? node : node.nextSibling);
-    });
-    node.addEventListener("drop", () => {
-      const newOrder = Array.from(thumbsEl.querySelectorAll(".thumb"))
-        .map((el) => el.dataset.photoId)
-        .filter(Boolean);
-      group.photoIds = newOrder.slice();
-      saveProperty();
-    });
+    // Drag-to-reorder is only meaningful in the default "by group" layout
+    // where all thumbs belong to the same group.
+    if (state.view === "group") {
+      node.addEventListener("dragstart", () => node.classList.add("dragging"));
+      node.addEventListener("dragend", () => node.classList.remove("dragging"));
+      node.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        const dragging = thumbsEl.querySelector(".thumb.dragging");
+        if (!dragging || dragging === node) return;
+        const rect = node.getBoundingClientRect();
+        const before = e.clientY < rect.top + rect.height / 2;
+        thumbsEl.insertBefore(dragging, before ? node : node.nextSibling);
+      });
+      node.addEventListener("drop", () => {
+        const newOrder = Array.from(thumbsEl.querySelectorAll(".thumb"))
+          .map((el) => el.dataset.photoId)
+          .filter(Boolean);
+        group.photoIds = newOrder.slice();
+        saveProperty();
+      });
+    } else {
+      node.draggable = false;
+    }
 
     const addTile = thumbsEl.querySelector(".thumb-add");
     if (addTile) thumbsEl.insertBefore(node, addTile);
@@ -1019,6 +1149,75 @@
     els.exportBtn.disabled = disabled;
     els.exportPhotosBtn.disabled = disabled;
   }
+
+  // -------------------- Lightbox (full-size photo viewer) --------------------
+  const lightbox = {
+    photos: [], // array of photo records currently being browsed
+    index: 0,
+  };
+
+  function openLightbox(group, photo) {
+    // Browse the photos that share the same DOM container as the tapped thumb
+    // (the "group" in by-group view, or the building tag bucket in tag view).
+    const containerSelector = state.view === "tag"
+      ? `[data-group-id="${tagGroupId(photoBuildingOf(photo))}"] .thumb`
+      : `[data-group-id="${group.id}"] .thumb:not(.thumb-add)`;
+    const ids = Array.from(document.querySelectorAll(containerSelector))
+      .map((n) => n.dataset.photoId)
+      .filter(Boolean);
+    const list = ids.map((id) => state.photos.get(id)).filter(Boolean);
+    if (!list.length) return;
+    lightbox.photos = list;
+    lightbox.index = Math.max(0, list.findIndex((p) => p.id === photo.id));
+    updateLightbox();
+    els.lightbox.hidden = false;
+    els.lightbox.setAttribute("aria-hidden", "false");
+  }
+
+  function updateLightbox() {
+    const p = lightbox.photos[lightbox.index];
+    if (!p) return closeLightbox();
+    els.lightboxImg.src = p.dataUrl;
+    els.lightboxImg.alt = p.label || "";
+    const pieces = [];
+    if (p.label) pieces.push(p.label);
+    const tag = photoBuildingOf(p);
+    pieces.push(tag);
+    if (p.takenAt) pieces.push(new Date(p.takenAt).toLocaleString());
+    else if (p.uploadedAt) pieces.push(`Uploaded ${new Date(p.uploadedAt).toLocaleString()}`);
+    if (p.gps) pieces.push(formatGps(p.gps));
+    els.lightboxCaption.textContent = pieces.join(" · ") +
+      `  (${lightbox.index + 1} of ${lightbox.photos.length})`;
+    els.lightboxPrevBtn.disabled = lightbox.index === 0;
+    els.lightboxNextBtn.disabled = lightbox.index === lightbox.photos.length - 1;
+  }
+
+  function stepLightbox(delta) {
+    const next = lightbox.index + delta;
+    if (next < 0 || next >= lightbox.photos.length) return;
+    lightbox.index = next;
+    updateLightbox();
+  }
+
+  function closeLightbox() {
+    els.lightbox.hidden = true;
+    els.lightbox.setAttribute("aria-hidden", "true");
+    els.lightboxImg.src = "";
+    lightbox.photos = [];
+  }
+
+  els.lightboxCloseBtn.addEventListener("click", closeLightbox);
+  els.lightboxPrevBtn.addEventListener("click", () => stepLightbox(-1));
+  els.lightboxNextBtn.addEventListener("click", () => stepLightbox(1));
+  els.lightbox.addEventListener("click", (e) => {
+    if (e.target === els.lightbox) closeLightbox();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (els.lightbox.hidden) return;
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "ArrowLeft") stepLightbox(-1);
+    else if (e.key === "ArrowRight") stepLightbox(1);
+  });
 
   // -------------------- In-app camera --------------------
   const camera = {
@@ -1310,6 +1509,7 @@
 
   async function buildPdf(options = {}) {
     const photoPaths = options.photoPaths instanceof Map ? options.photoPaths : null;
+    const layout = options.layout === "tag" ? "tag" : "group";
     if (!window.jspdf || !window.jspdf.jsPDF) {
       throw new Error("PDF library failed to load.");
     }
@@ -1319,7 +1519,38 @@
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 40;
     const meta = state.property.meta;
-    const groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
+
+    // For the PDF we treat layout == "group" (the default) as one section per
+    // real group, and layout == "tag" as one virtual section per building
+    // tag that actually has photos. Each entry in the section carries the
+    // source photo plus (in tag mode) a subtitle pointing back at the
+    // original group, e.g. "1. Walls — Rear elevation".
+    let groupsWithPhotos;
+    if (layout === "tag") {
+      const buckets = new Map();
+      for (const t of BUILDING_TAGS) buckets.set(t, []);
+      for (const g of state.property.groups) {
+        for (const pid of g.photoIds) {
+          const photo = state.photos.get(pid);
+          if (!photo) continue;
+          buckets.get(photoBuildingOf(photo)).push({ photo, source: g });
+        }
+      }
+      groupsWithPhotos = [];
+      for (const tag of BUILDING_TAGS) {
+        const entries = buckets.get(tag);
+        if (!entries.length) continue;
+        groupsWithPhotos.push({
+          id: tagGroupId(tag),
+          name: tag,
+          photoIds: entries.map((e) => e.photo.id),
+          virtual: true,
+          entries,
+        });
+      }
+    } else {
+      groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
+    }
 
     // Cover page (page 1)
     doc.setFont("helvetica", "bold");
@@ -1387,16 +1618,29 @@
       doc.line(margin, margin + 12, pageW - margin, margin + 12);
       doc.setLineWidth(0.2);
 
+      // In tag layout, iterate the prebuilt entries (so we can see the source
+      // group) instead of plain photoIds.
+      const iterator = g.virtual
+        ? g.entries.map((e) => ({ photo: e.photo, source: e.source }))
+        : g.photoIds.map((pid) => ({ photo: state.photos.get(pid), source: g }));
+
       let cursorY = margin + 32;
       let index = 0;
-      for (const pid of g.photoIds) {
-        const photo = state.photos.get(pid);
+      for (const entry of iterator) {
+        const photo = entry.photo;
+        const sourceGroup = entry.source;
         if (!photo) continue;
         index += 1;
         const isUpload = photo.source === "upload";
         const building = BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
-        const tagPrefix = building !== DEFAULT_BUILDING ? `[${building}] ` : "";
-        const labelText = `${index}. ${tagPrefix}${photo.label || g.name}`;
+        // In group layout, prefix non-Main tags. In tag layout, prefix with
+        // the source group name so the reader knows which group it came from.
+        const prefix = layout === "tag"
+          ? `${sourceGroup.name} — `
+          : building !== DEFAULT_BUILDING
+            ? `[${building}] `
+            : "";
+        const labelText = `${index}. ${prefix}${photo.label || sourceGroup.name}`;
         // Captions: single line for camera captures, a 3-line stack for
         // uploaded photos so Captured / Location / Uploaded each get their own line.
         const capH = isUpload ? 58 : 16;
@@ -1478,7 +1722,7 @@
 
         cursorY += drawH + capH + 18;
 
-        const isLast = g.photoIds[g.photoIds.length - 1] === pid;
+        const isLast = entry === iterator[iterator.length - 1];
         if (!isLast && cursorY + 180 > pageH - margin) {
           doc.addPage();
           doc.setFont("helvetica", "bold");
@@ -1593,15 +1837,25 @@
     return { doc, filename: `${reportBaseName()}.pdf` };
   }
 
-  async function exportPdf() {
+  async function exportPdf(opts) {
+    const layout = (opts && opts.layout) || "group";
     try {
-      const { doc, filename } = await buildPdf();
+      const { doc, filename } = await buildPdf({ layout });
       doc.save(filename);
-      toast("PDF saved.");
+      toast(`PDF saved (${layout === "tag" ? "by tag" : "by group"}).`);
     } catch (err) {
       console.error(err);
       toast(err.message || "Failed to build PDF.", "err");
     }
+  }
+
+  function openPdfLayoutDialog() {
+    els.pdfLayoutDialog.hidden = false;
+    els.pdfLayoutDialog.setAttribute("aria-hidden", "false");
+  }
+  function closePdfLayoutDialog() {
+    els.pdfLayoutDialog.hidden = true;
+    els.pdfLayoutDialog.setAttribute("aria-hidden", "true");
   }
 
 
@@ -1718,34 +1972,79 @@
     })[c]);
   }
 
-  function buildHtmlIndex(photoPaths) {
+  function buildHtmlIndex(photoPaths, opts) {
+    const options = opts || {};
+    const layout = options.layout === "tag" ? "tag" : "group";
+    const otherHref = options.otherHref || null;
+    const otherLabel = options.otherLabel || null;
+
     const meta = state.property.meta || {};
-    const groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
     const fmtIso = (iso) => (iso ? new Date(iso).toLocaleString() : "not in photo metadata");
 
-    // Flat contents list - one row per group.
+    // Build sections list. For layout == "group" each real group is a section.
+    // For layout == "tag" each non-empty building tag is a section whose
+    // photo entries carry their source group for the sub-title.
+    let sections;
+    if (layout === "tag") {
+      const buckets = new Map();
+      for (const t of BUILDING_TAGS) buckets.set(t, []);
+      for (const g of state.property.groups) {
+        for (const pid of g.photoIds) {
+          const photo = state.photos.get(pid);
+          if (!photo) continue;
+          buckets.get(photoBuildingOf(photo)).push({ photo, source: g });
+        }
+      }
+      sections = [];
+      for (const tag of BUILDING_TAGS) {
+        const entries = buckets.get(tag);
+        if (!entries.length) continue;
+        sections.push({
+          id: `tag-${tag}`,
+          name: tag,
+          entries,
+        });
+      }
+    } else {
+      sections = state.property.groups
+        .filter((g) => g.photoIds.length > 0)
+        .map((g) => ({
+          id: g.id,
+          name: g.name,
+          entries: g.photoIds
+            .map((pid) => {
+              const photo = state.photos.get(pid);
+              return photo ? { photo, source: g } : null;
+            })
+            .filter(Boolean),
+        }));
+    }
+
+    // Contents list.
     let totalPhotos = 0;
     let tocHtml = "<ul>";
-    for (const g of groupsWithPhotos) {
-      const n = g.photoIds.length;
+    for (const s of sections) {
+      const n = s.entries.length;
       totalPhotos += n;
-      tocHtml += `<li><a href="#g-${escapeHtml(g.id)}">${escapeHtml(g.name)}</a> <span class="count">${n} photo${n === 1 ? "" : "s"}</span></li>`;
+      tocHtml += `<li><a href="#g-${escapeHtml(s.id)}">${escapeHtml(s.name)}</a> <span class="count">${n} photo${n === 1 ? "" : "s"}</span></li>`;
     }
     tocHtml += "</ul>";
 
-    // Per-group sections with figures.
+    // Section bodies with photo figures.
     let sectionsHtml = "";
-    for (const g of groupsWithPhotos) {
-      sectionsHtml += `<section id="g-${escapeHtml(g.id)}" class="group"><h2>${escapeHtml(g.name)}</h2><div class="photos">`;
+    for (const s of sections) {
+      sectionsHtml += `<section id="g-${escapeHtml(s.id)}" class="group"><h2>${escapeHtml(s.name)}</h2><div class="photos">`;
       let index = 0;
-      for (const pid of g.photoIds) {
-        const photo = state.photos.get(pid);
-        if (!photo) continue;
+      for (const { photo, source } of s.entries) {
         index += 1;
-        const path = photoPaths.get(pid) || "";
-        const building = BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
-        const label = `${index}. ${photo.label || g.name}`;
+        const path = photoPaths.get(photo.id) || "";
+        const building = photoBuildingOf(photo);
         const hrefEsc = escapeHtml(path);
+        // Label: in tag layout prefix the source group, in group layout use the photo label.
+        const baseLabel = layout === "tag"
+          ? `${source.name} — ${photo.label || ""}`.trim().replace(/— $/, "")
+          : (photo.label || source.name);
+        const label = `${index}. ${baseLabel}`;
         const labelEsc = escapeHtml(label);
         const tagClass = building === DEFAULT_BUILDING ? "tag tag-main" : "tag tag-ext";
         sectionsHtml += `<figure>`;
@@ -1767,12 +2066,20 @@
       sectionsHtml += `</div></section>`;
     }
 
+    // Top-of-page link to the sibling layout.
+    const switchHtml = otherHref
+      ? `<p class="layout-switch">Layout: <strong>${layout === "tag" ? "by tag" : "by group"}</strong> · <a href="${escapeHtml(otherHref)}">Switch to ${escapeHtml(otherLabel || "other layout")}</a></p>`
+      : "";
+
     const css = `
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:#f4f5f4;color:#13241d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:15px;line-height:1.45}
 .wrap{max-width:980px;margin:0 auto;padding:16px}
 header.cover{background:#0b3d2e;color:#fff;padding:18px 20px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
 header.cover h1{margin:0 0 8px;font-size:1.35rem}
+.layout-switch{background:#fff;border:1px solid #dde3e0;border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:0.88rem;color:#5b6b65}
+.layout-switch strong{color:#13241d;margin:0 4px}
+.layout-switch a{color:#1652b2;text-decoration:underline}
 .cover dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:6px 0 0;font-size:0.9rem}
 .cover dt{font-weight:600;opacity:0.85}
 .cover dd{margin:0}
@@ -1820,6 +2127,7 @@ figcaption{padding:10px 12px;font-size:0.88rem}
 <dt>Generated</dt><dd>${escapeHtml(new Date().toLocaleString())}</dd>
 </dl>
 </header>
+${switchHtml}
 <nav class="toc"><h2>Contents</h2>${tocHtml}<p class="total">Total photos: ${totalPhotos}</p></nav>
 <main>${sectionsHtml}</main>
 </div>
@@ -1862,21 +2170,40 @@ figcaption{padding:10px 12px;font-size:0.88rem}
         photoPaths.set(photo.id, `${dir}/${name}`);
       }
 
-      // PDF alongside the photos, with the embedded JPEGs hyperlinked to
-      // the corresponding full-resolution files in the archive.
+      // Ship two PDFs (one per layout) and two HTML indices so the user
+      // can pick whichever is more useful after extraction.
       try {
-        const { doc, filename: pdfName } = await buildPdf({ photoPaths });
-        zip.file(pdfName, doc.output("blob"));
+        const { doc, filename: pdfName } = await buildPdf({ photoPaths, layout: "group" });
+        zip.file(pdfName.replace(/\.pdf$/, "_by-group.pdf"), doc.output("blob"));
       } catch (err) {
-        console.warn("PDF generation failed; ZIP will ship without it.", err);
-        toast("PDF couldn't be generated — ZIP includes HTML only.", "err");
+        console.warn("Group-layout PDF failed", err);
+      }
+      try {
+        const { doc, filename: pdfName } = await buildPdf({ photoPaths, layout: "tag" });
+        zip.file(pdfName.replace(/\.pdf$/, "_by-tag.pdf"), doc.output("blob"));
+      } catch (err) {
+        console.warn("Tag-layout PDF failed", err);
       }
 
-      // Lightweight HTML index that references the same photo files by
-      // relative path. Open index.html after extracting to browse the
-      // report in any browser without needing the PDF reader.
+      // Lightweight HTML indices referencing the same photo files by
+      // relative path. Two layouts; each cross-links to the other.
       try {
-        zip.file("index.html", buildHtmlIndex(photoPaths));
+        zip.file(
+          "index.html",
+          buildHtmlIndex(photoPaths, {
+            layout: "group",
+            otherHref: "index-by-tag.html",
+            otherLabel: "by tag (Main / Ext1–4)",
+          })
+        );
+        zip.file(
+          "index-by-tag.html",
+          buildHtmlIndex(photoPaths, {
+            layout: "tag",
+            otherHref: "index.html",
+            otherLabel: "by group",
+          })
+        );
       } catch (err) {
         console.warn("HTML index generation failed.", err);
       }
@@ -1941,8 +2268,30 @@ figcaption{padding:10px 12px;font-size:0.88rem}
     if (e.key === "Enter") els.addGroupBtn.click();
   });
 
+  for (const btn of els.viewToggleBtns) {
+    btn.addEventListener("click", () => setView(btn.dataset.view));
+  }
+
   els.exportBtn.addEventListener("click", () => {
-    exportPdf();
+    if (els.exportBtn.disabled) return;
+    openPdfLayoutDialog();
+  });
+
+  els.pdfLayoutCancelBtn.addEventListener("click", closePdfLayoutDialog);
+  els.pdfLayoutBackdrop.addEventListener("click", closePdfLayoutDialog);
+  els.pdfLayoutGroupBtn.addEventListener("click", () => {
+    closePdfLayoutDialog();
+    exportPdf({ layout: "group" });
+  });
+  els.pdfLayoutTagBtn.addEventListener("click", () => {
+    closePdfLayoutDialog();
+    exportPdf({ layout: "tag" });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!els.pdfLayoutDialog.hidden && e.key === "Escape") {
+      e.preventDefault();
+      closePdfLayoutDialog();
+    }
   });
 
   els.exportPhotosBtn.addEventListener("click", () => {
