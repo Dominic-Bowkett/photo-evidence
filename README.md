@@ -34,26 +34,26 @@ Live demo via GitHub Pages: <https://dominic-bowkett.github.io/photo-evidence/>
 - The GPS coordinates and accuracy are stamped onto each photo and also
   written into the EXIF metadata when exporting the ZIP.
 
-### Groups and sections
-Every new property is seeded with this fixed structure:
+### Groups and building tags
+Every new property is seeded with this fixed set of **protected top-level
+groups** (locked name, no delete):
 
-**Top-level protected groups** (locked name, no delete):
 External Elevations, Meters, Windows, Doors, Conservatory, Renewables,
-Mains Heating, Secondary Heating, Water Heating, Ventilation, Lighting.
-
-**Main Property section** (also protected), containing three sub-groups:
+Mains Heating, Secondary Heating, Water Heating, Ventilation, Lighting,
 Walls, Loft, Floor.
 
-**Extensions (clone of Main Property)**: a `+ Add extension` button beneath
-the Main Property section clones the three sub-groups into `Extension 1`,
-`Extension 2`, `Extension 3`, `Extension 4` — capped at four. Cloning only
-copies the sub-group structure; no photos carry over. Each extension has a
-`Remove Extension N` button that deletes the section and its photos (after
-a confirm).
+**Building tag on every photo.** Rather than duplicating the building-fabric
+groups per extension, each photo carries a small tag — `Main`, `Ext1`,
+`Ext2`, `Ext3`, or `Ext4` — selected via a dropdown on the thumb (default
+`Main`). Use it in the Walls / Loft / Floor groups (or any other) to
+indicate which building on site the shot belongs to. In the PDF / HTML
+the tag is shown as a small badge or `[Ext1]` prefix next to non-Main
+photos; in the ZIP it's part of the filename bundled alongside the photo
+metadata.
 
 **User-added groups**: the *Add group* row at the bottom creates an
-unprotected group that can be renamed inline and deleted. The rest of the
-workflow (camera capture, labels, reorder, export) is identical.
+unprotected group that can be renamed inline and deleted. Workflow (camera
+capture, uploads, labels, reorder, exports, building tag) is identical.
 
 ### Persistence
 - Everything is **autosaved to the browser** via IndexedDB — property

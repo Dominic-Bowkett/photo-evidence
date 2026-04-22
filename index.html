@@ -114,8 +114,17 @@
       <figure class="thumb" draggable="true">
         <img alt="" />
         <figcaption>
-          <input type="text" class="thumb-label" placeholder="Label" />
-          <button type="button" class="thumb-remove" title="Remove photo" aria-label="Remove photo">&times;</button>
+          <div class="thumb-row">
+            <select class="thumb-building" aria-label="Building tag">
+              <option value="Main">Main</option>
+              <option value="Ext1">Ext1</option>
+              <option value="Ext2">Ext2</option>
+              <option value="Ext3">Ext3</option>
+              <option value="Ext4">Ext4</option>
+            </select>
+            <input type="text" class="thumb-label" placeholder="Label" />
+            <button type="button" class="thumb-remove" title="Remove photo" aria-label="Remove photo">&times;</button>
+          </div>
         </figcaption>
       </figure>
     </template>

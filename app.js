@@ -19,16 +19,13 @@
     { name: "Water Heating" },
     { name: "Ventilation" },
     { name: "Lighting" },
-  ];
-
-  const BUILDING_SUBGROUPS = [
     { name: "Walls" },
     { name: "Loft" },
     { name: "Floor" },
   ];
-  const MAIN_SECTION = "Main Property";
-  const EXTENSION_PREFIX = "Extension ";
-  const MAX_EXTENSIONS = 4;
+
+  const BUILDING_TAGS = ["Main", "Ext1", "Ext2", "Ext3", "Ext4"];
+  const DEFAULT_BUILDING = "Main";
   // Storage / export quality: keep individual exported images at near-original
   // fidelity. Camera captures are re-encoded once when the date/GPS overlay is
   // burned in; uploads keep their original bytes unless they exceed the ceiling.
@@ -405,6 +402,7 @@
       height: h,
       takenAt: stampDate.toISOString(),
       gps: state.gps ? { ...state.gps } : null,
+      building: DEFAULT_BUILDING,
       label: "",
     };
   }
@@ -516,6 +514,7 @@
       gps, // from EXIF, may be null
       uploadedAt: new Date().toISOString(),
       originalName: file.name || "",
+      building: DEFAULT_BUILDING,
       label: "",
     };
   }
@@ -554,60 +553,80 @@
 
   // -------------------- Property manager --------------------
   function makeDefaultGroups() {
-    const groups = DEFAULT_GROUPS.map((g) => ({
+    return DEFAULT_GROUPS.map((g) => ({
       id: uid("g"),
       name: g.name,
       photoIds: [],
       protected: true,
     }));
-    for (const s of BUILDING_SUBGROUPS) {
-      groups.push({
-        id: uid("g"),
-        name: s.name,
-        section: MAIN_SECTION,
-        photoIds: [],
-        protected: true,
-      });
+  }
+
+  // Rename legacy top-level names that have changed. (Historically these
+  // were sub-group renames; now they're top-level too.)
+  const LEGACY_RENAMES = {
+    "wall thickness": "Walls",
+    roof: "Loft",
+  };
+
+  function migrateDefaults(property, photosMap) {
+    if (!property || !Array.isArray(property.groups)) {
+      return { changed: false, dirtyPhotoIds: [] };
     }
-    return groups;
-  }
-
-  function makeSubgroupsForSection(section) {
-    return BUILDING_SUBGROUPS.map((s) => ({
-      id: uid("g"),
-      name: s.name,
-      section,
-      photoIds: [],
-      protected: true,
-    }));
-  }
-
-  function migrateDefaults(property) {
-    if (!property || !Array.isArray(property.groups)) return false;
     let changed = false;
+    const dirtyPhotoIds = [];
 
-    // Rename legacy sub-group names that have been updated in the defaults.
-    const subRenames = {
-      "wall thickness": "Walls",
-      roof: "Loft",
-    };
+    // Rename legacy group names.
     for (const g of property.groups) {
-      if (!g.section) continue;
       const norm = (g.name || "").trim().toLowerCase();
-      if (subRenames[norm]) {
-        g.name = subRenames[norm];
+      if (LEGACY_RENAMES[norm]) {
+        g.name = LEGACY_RENAMES[norm];
         changed = true;
       }
     }
 
+    // Collapse the old Main Property / Extension N sections into flat
+    // top-level groups, stamping each affected photo with its building tag.
+    const sectioned = property.groups.filter((g) => g.section);
+    if (sectioned.length) {
+      const findOrCreateFlat = (name) => {
+        const lower = (name || "").toLowerCase();
+        let top = property.groups.find(
+          (g) => !g.section && (g.name || "").toLowerCase() === lower
+        );
+        if (!top) {
+          top = { id: uid("g"), name, photoIds: [], protected: true };
+          property.groups.push(top);
+        }
+        return top;
+      };
+      for (const sg of sectioned) {
+        const section = sg.section;
+        let building = DEFAULT_BUILDING;
+        if (section === "Main Property") building = "Main";
+        else if (section.startsWith("Extension ")) {
+          const n = section.slice("Extension ".length).trim();
+          if (/^\d+$/.test(n)) building = `Ext${n}`;
+        }
+        const target = findOrCreateFlat(sg.name);
+        for (const pid of sg.photoIds) {
+          const photo = photosMap && photosMap.get(pid);
+          if (photo) {
+            photo.building = building;
+            if (photo.propertyId === property.id) dirtyPhotoIds.push(pid);
+          }
+          if (!target.photoIds.includes(pid)) target.photoIds.push(pid);
+        }
+      }
+      property.groups = property.groups.filter((g) => !g.section);
+      changed = true;
+    }
+
     // Add any missing flat default groups.
-    const existingFlat = new Set(
-      property.groups
-        .filter((g) => !g.section)
-        .map((g) => (g.name || "").trim().toLowerCase())
+    const existingNames = new Set(
+      property.groups.map((g) => (g.name || "").trim().toLowerCase())
     );
     for (const d of DEFAULT_GROUPS) {
-      if (!existingFlat.has(d.name.toLowerCase())) {
+      if (!existingNames.has(d.name.toLowerCase())) {
         property.groups.push({
           id: uid("g"),
           name: d.name,
@@ -618,86 +637,18 @@
       }
     }
 
-    // Ensure Main Property section has its three sub-groups.
-    const mainSubgroups = property.groups.filter((g) => g.section === MAIN_SECTION);
-    if (mainSubgroups.length === 0) {
-      property.groups.push(...makeSubgroupsForSection(MAIN_SECTION));
-      changed = true;
-    } else {
-      const names = new Set(mainSubgroups.map((g) => (g.name || "").toLowerCase()));
-      for (const s of BUILDING_SUBGROUPS) {
-        if (!names.has(s.name.toLowerCase())) {
-          property.groups.push({
-            id: uid("g"),
-            name: s.name,
-            section: MAIN_SECTION,
-            photoIds: [],
-            protected: true,
-          });
-          changed = true;
-        }
-      }
-    }
-
     // Apply the protected flag to any group that matches a default name.
     const flatDefaultNames = new Set(DEFAULT_GROUPS.map((g) => g.name.toLowerCase()));
-    const subDefaultNames = new Set(BUILDING_SUBGROUPS.map((g) => g.name.toLowerCase()));
     for (const group of property.groups) {
       if (group.protected) continue;
       const norm = (group.name || "").trim().toLowerCase();
-      const isFlat = !group.section && flatDefaultNames.has(norm);
-      const isSubgroup = group.section && subDefaultNames.has(norm);
-      if (isFlat || isSubgroup) {
+      if (flatDefaultNames.has(norm)) {
         group.protected = true;
         changed = true;
       }
     }
 
-    return changed;
-  }
-
-  function extensionSections() {
-    const found = new Set();
-    for (const g of state.property.groups) {
-      if (g.section && g.section.startsWith(EXTENSION_PREFIX)) found.add(g.section);
-    }
-    return Array.from(found).sort((a, b) => {
-      const na = parseInt(a.slice(EXTENSION_PREFIX.length), 10) || 0;
-      const nb = parseInt(b.slice(EXTENSION_PREFIX.length), 10) || 0;
-      return na - nb;
-    });
-  }
-
-  function addExtension() {
-    const existing = new Set(extensionSections());
-    if (existing.size >= MAX_EXTENSIONS) {
-      toast(`Maximum of ${MAX_EXTENSIONS} extensions reached.`, "err");
-      return;
-    }
-    let n = 1;
-    while (existing.has(`${EXTENSION_PREFIX}${n}`) && n <= MAX_EXTENSIONS) n++;
-    const section = `${EXTENSION_PREFIX}${n}`;
-    state.property.groups.push(...makeSubgroupsForSection(section));
-    renderGroups();
-    updateExportButton();
-    saveProperty();
-    toast(`${section} added.`);
-  }
-
-  async function removeExtension(section) {
-    if (!confirm(`Remove ${section} and all its photos? This can't be undone.`)) return;
-    const groupsToRemove = state.property.groups.filter((g) => g.section === section);
-    for (const group of groupsToRemove) {
-      for (const pid of group.photoIds) {
-        state.photos.delete(pid);
-        IDB.deletePhoto(pid).catch(() => {});
-      }
-    }
-    state.property.groups = state.property.groups.filter((g) => g.section !== section);
-    renderGroups();
-    updateExportButton();
-    saveProperty();
-    toast(`${section} removed.`);
+    return { changed, dirtyPhotoIds };
   }
 
   function makeNewProperty(name) {
@@ -761,8 +712,21 @@
     if (!state.property.groups || !state.property.groups.length) {
       state.property.groups = makeDefaultGroups();
       saveProperty();
-    } else if (migrateDefaults(state.property)) {
-      saveProperty();
+    } else {
+      const migration = migrateDefaults(state.property, state.photos);
+      if (migration.changed) {
+        for (const pid of migration.dirtyPhotoIds) {
+          const photo = state.photos.get(pid);
+          if (photo) {
+            try {
+              await IDB.putPhoto(photo);
+            } catch (err) {
+              console.warn("Failed to persist migrated photo", err);
+            }
+          }
+        }
+        saveProperty();
+      }
     }
 
     initExpandedForProperty();
@@ -823,73 +787,9 @@
 
   function renderGroups() {
     els.groups.innerHTML = "";
-
-    // Top-level groups first (no section) in their existing order.
-    for (const group of state.property.groups.filter((g) => !g.section)) {
+    for (const group of state.property.groups) {
       renderGroup(group, els.groups);
     }
-
-    // Then sections: Main Property, then Extensions in order.
-    const sections = [];
-    if (state.property.groups.some((g) => g.section === MAIN_SECTION)) {
-      sections.push(MAIN_SECTION);
-    }
-    sections.push(...extensionSections());
-
-    for (const section of sections) {
-      const wrap = createSectionElement(section);
-      els.groups.appendChild(wrap);
-      const body = wrap.querySelector(".section-body");
-      for (const g of state.property.groups.filter((gg) => gg.section === section)) {
-        renderGroup(g, body);
-      }
-    }
-
-    renderAddExtensionRow();
-  }
-
-  function createSectionElement(section) {
-    const wrap = document.createElement("section");
-    wrap.className = "section-wrap";
-    wrap.dataset.section = section;
-
-    const header = document.createElement("div");
-    header.className = "section-header";
-    const title = document.createElement("h2");
-    title.className = "section-title";
-    title.textContent = section;
-    header.appendChild(title);
-    if (section.startsWith(EXTENSION_PREFIX)) {
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.className = "btn btn-danger-ghost";
-      rm.textContent = `Remove ${section}`;
-      rm.addEventListener("click", () => removeExtension(section));
-      header.appendChild(rm);
-    }
-    wrap.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "section-body";
-    wrap.appendChild(body);
-    return wrap;
-  }
-
-  function renderAddExtensionRow() {
-    const count = extensionSections().length;
-    const row = document.createElement("div");
-    row.className = "add-extension-row";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "btn btn-primary-soft";
-    btn.disabled = count >= MAX_EXTENSIONS;
-    btn.textContent =
-      count >= MAX_EXTENSIONS
-        ? `Maximum of ${MAX_EXTENSIONS} extensions added`
-        : `+ Add extension (${count}/${MAX_EXTENSIONS})`;
-    btn.addEventListener("click", addExtension);
-    row.appendChild(btn);
-    els.groups.appendChild(row);
   }
 
   function renderGroup(group, container) {
@@ -986,6 +886,19 @@
       saveLabel();
       saveProperty();
     });
+
+    const buildingSelect = node.querySelector(".thumb-building");
+    if (buildingSelect) {
+      const current = BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
+      buildingSelect.value = current;
+      if (photo.building !== current) {
+        photo.building = current;
+      }
+      buildingSelect.addEventListener("change", () => {
+        photo.building = buildingSelect.value;
+        savePhotoNow(photo).catch((err) => console.warn("Failed to save building tag", err));
+      });
+    }
 
     node.querySelector(".thumb-remove").addEventListener("click", async () => {
       const label = photo.label || `photo ${group.photoIds.indexOf(photo.id) + 1}`;
@@ -1214,11 +1127,13 @@
     const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
     const photo = {
       id: uid("p"),
+      source: "camera",
       dataUrl,
       width: outW,
       height: outH,
       takenAt: stampDate.toISOString(),
       gps: state.gps ? { ...state.gps } : null,
+      building: DEFAULT_BUILDING,
       label: "",
     };
     camera.buffer.push(photo);
@@ -1461,7 +1376,7 @@
       doc.addPage();
       const startPage = doc.internal.getNumberOfPages();
       groupStartPages.set(g.id, startPage);
-      const displayName = g.section ? `${g.section} — ${g.name}` : g.name;
+      const displayName = g.name;
       addOutline(displayName, startPage);
 
       doc.setFont("helvetica", "bold");
@@ -1479,7 +1394,9 @@
         if (!photo) continue;
         index += 1;
         const isUpload = photo.source === "upload";
-        const labelText = `${index}. ${photo.label || g.name}`;
+        const building = BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
+        const tagPrefix = building !== DEFAULT_BUILDING ? `[${building}] ` : "";
+        const labelText = `${index}. ${tagPrefix}${photo.label || g.name}`;
         // Captions: single line for camera captures, a 3-line stack for
         // uploaded photos so Captured / Location / Uploaded each get their own line.
         const capH = isUpload ? 58 : 16;
@@ -1601,35 +1518,14 @@
 
     let total = 0;
     const ROW_HEIGHT = 26;
-    let currentSection = undefined;
     for (const g of groupsWithPhotos) {
-      // Section heading (non-clickable) when we move into a new section.
-      if (g.section !== currentSection) {
-        currentSection = g.section;
-        if (currentSection) {
-          cy += 4;
-          if (cy > pageH - margin - 40) break;
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(12);
-          doc.setTextColor(60);
-          doc.text(currentSection, margin, cy);
-          doc.setDrawColor(210);
-          doc.setLineWidth(0.4);
-          doc.line(margin, cy + 2, pageW - margin, cy + 2);
-          doc.setLineWidth(0.2);
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(0);
-          cy += 16;
-        }
-      }
-
       const target = groupStartPages.get(g.id);
       const title = g.name;
       const countText = `${g.photoIds.length} photo${g.photoIds.length === 1 ? "" : "s"}`;
       const pageText = `p. ${target}`;
       total += g.photoIds.length;
 
-      const rowLeft = g.section ? margin + 16 : margin;
+      const rowLeft = margin;
       const titleW = doc.getTextWidth(title);
       const pageW_text = doc.getTextWidth(pageText);
       const countW = doc.getTextWidth(countText);
@@ -1827,42 +1723,34 @@
     const groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
     const fmtIso = (iso) => (iso ? new Date(iso).toLocaleString() : "not in photo metadata");
 
-    // Build the Contents section, grouping section sub-groups under a heading.
+    // Flat contents list - one row per group.
     let totalPhotos = 0;
     let tocHtml = "<ul>";
-    let currentSection = undefined;
     for (const g of groupsWithPhotos) {
-      if (g.section !== currentSection) {
-        if (currentSection) tocHtml += "</ul></li>";
-        currentSection = g.section;
-        if (currentSection) {
-          tocHtml += `<li class="toc-section"><span class="toc-section-name">${escapeHtml(currentSection)}</span><ul>`;
-        }
-      }
       const n = g.photoIds.length;
       totalPhotos += n;
       tocHtml += `<li><a href="#g-${escapeHtml(g.id)}">${escapeHtml(g.name)}</a> <span class="count">${n} photo${n === 1 ? "" : "s"}</span></li>`;
     }
-    if (currentSection) tocHtml += "</ul></li>";
     tocHtml += "</ul>";
 
-    // Build the per-group sections with figures.
+    // Per-group sections with figures.
     let sectionsHtml = "";
     for (const g of groupsWithPhotos) {
-      const displayName = g.section ? `${g.section} — ${g.name}` : g.name;
-      sectionsHtml += `<section id="g-${escapeHtml(g.id)}" class="group"><h2>${escapeHtml(displayName)}</h2><div class="photos">`;
+      sectionsHtml += `<section id="g-${escapeHtml(g.id)}" class="group"><h2>${escapeHtml(g.name)}</h2><div class="photos">`;
       let index = 0;
       for (const pid of g.photoIds) {
         const photo = state.photos.get(pid);
         if (!photo) continue;
         index += 1;
         const path = photoPaths.get(pid) || "";
+        const building = BUILDING_TAGS.includes(photo.building) ? photo.building : DEFAULT_BUILDING;
         const label = `${index}. ${photo.label || g.name}`;
         const hrefEsc = escapeHtml(path);
         const labelEsc = escapeHtml(label);
+        const tagClass = building === DEFAULT_BUILDING ? "tag tag-main" : "tag tag-ext";
         sectionsHtml += `<figure>`;
         sectionsHtml += `<a href="${hrefEsc}" target="_blank" rel="noopener"><img src="${hrefEsc}" alt="${labelEsc}" loading="lazy"></a>`;
-        sectionsHtml += `<figcaption><div class="label">${labelEsc}</div>`;
+        sectionsHtml += `<figcaption><div class="label"><span class="${tagClass}">${escapeHtml(building)}</span> ${labelEsc}</div>`;
         if (photo.source === "upload") {
           sectionsHtml += `<div class="meta-line">Date taken: ${escapeHtml(fmtIso(photo.takenAt))}</div>`;
           sectionsHtml += `<div class="meta-line">Location taken: ${escapeHtml(photo.gps ? formatGps(photo.gps) : "not in photo metadata")}</div>`;
@@ -1904,6 +1792,9 @@ figure{margin:0;border:1px solid #eef3f0;border-radius:10px;overflow:hidden;back
 figure img{display:block;width:100%;height:auto;background:#000}
 figcaption{padding:10px 12px;font-size:0.88rem}
 .label{font-weight:600;margin-bottom:4px}
+.tag{display:inline-block;font-size:0.7rem;font-weight:700;padding:1px 6px;border-radius:999px;margin-right:6px;vertical-align:middle;letter-spacing:0.3px}
+.tag-main{background:#eef5ef;color:#0b3d2e}
+.tag-ext{background:#fff2d6;color:#7a5200}
 .meta-line{color:#5b6b65;font-size:0.82rem;margin:2px 0}
 .open-link{display:inline-block;margin-top:6px;color:#1652b2;text-decoration:underline;font-size:0.82rem}
 `;
@@ -1958,10 +1849,7 @@ figcaption{padding:10px 12px;font-size:0.88rem}
       for (const { photo, group, index, bytes, stamp } of items) {
         let dir = dirForGroup.get(group.id);
         if (!dir) {
-          const parts = [];
-          if (group.section) parts.push(slugify(group.section));
-          parts.push(slugify(group.name));
-          dir = parts.join("/");
+          dir = slugify(group.name);
           const n = (dirTaken.get(dir) || 0) + 1;
           dirTaken.set(dir, n);
           if (n > 1) dir = `${dir}-${n}`;
