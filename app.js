@@ -896,7 +896,10 @@
     els.groups.appendChild(node);
 
     for (const { group, photo } of entries) {
-      renderThumb(group, photo, { hint: group.name });
+      renderThumb(group, photo, {
+        containerGroupId: synthetic.id,
+        hint: group.name,
+      });
     }
     updateGroupCount(synthetic);
   }
