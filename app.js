@@ -1393,7 +1393,8 @@
     return parts.join("_");
   }
 
-  async function buildPdf() {
+  async function buildPdf(options = {}) {
+    const photoPaths = options.photoPaths instanceof Map ? options.photoPaths : null;
     if (!window.jspdf || !window.jspdf.jsPDF) {
       throw new Error("PDF library failed to load.");
     }
@@ -1515,6 +1516,13 @@
           // we use for ZIP / share exports keeps full fidelity.
           const pdfDataUrl = await reencodeForPdf(photo.dataUrl);
           doc.addImage(pdfDataUrl, "JPEG", x, cursorY, drawW, drawH, undefined, "FAST");
+          // When built as part of a ZIP export, link the embedded image to
+          // the corresponding full-resolution JPEG sitting alongside the PDF
+          // in the archive. Tapping the photo in a PDF viewer opens the file
+          // directly. Ignored silently by viewers that don't support it.
+          if (photoPaths && photoPaths.has(photo.id)) {
+            doc.link(x, cursorY, drawW, drawH, { url: photoPaths.get(photo.id) });
+          }
         } catch (err) {
           console.error("addImage failed", err);
           continue;
@@ -1804,6 +1812,130 @@
       });
   }
 
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[c]);
+  }
+
+  function buildHtmlIndex(photoPaths) {
+    const meta = state.property.meta || {};
+    const groupsWithPhotos = state.property.groups.filter((g) => g.photoIds.length > 0);
+    const fmtIso = (iso) => (iso ? new Date(iso).toLocaleString() : "not in photo metadata");
+
+    // Build the Contents section, grouping section sub-groups under a heading.
+    let totalPhotos = 0;
+    let tocHtml = "<ul>";
+    let currentSection = undefined;
+    for (const g of groupsWithPhotos) {
+      if (g.section !== currentSection) {
+        if (currentSection) tocHtml += "</ul></li>";
+        currentSection = g.section;
+        if (currentSection) {
+          tocHtml += `<li class="toc-section"><span class="toc-section-name">${escapeHtml(currentSection)}</span><ul>`;
+        }
+      }
+      const n = g.photoIds.length;
+      totalPhotos += n;
+      tocHtml += `<li><a href="#g-${escapeHtml(g.id)}">${escapeHtml(g.name)}</a> <span class="count">${n} photo${n === 1 ? "" : "s"}</span></li>`;
+    }
+    if (currentSection) tocHtml += "</ul></li>";
+    tocHtml += "</ul>";
+
+    // Build the per-group sections with figures.
+    let sectionsHtml = "";
+    for (const g of groupsWithPhotos) {
+      const displayName = g.section ? `${g.section} — ${g.name}` : g.name;
+      sectionsHtml += `<section id="g-${escapeHtml(g.id)}" class="group"><h2>${escapeHtml(displayName)}</h2><div class="photos">`;
+      let index = 0;
+      for (const pid of g.photoIds) {
+        const photo = state.photos.get(pid);
+        if (!photo) continue;
+        index += 1;
+        const path = photoPaths.get(pid) || "";
+        const label = `${index}. ${photo.label || g.name}`;
+        const hrefEsc = escapeHtml(path);
+        const labelEsc = escapeHtml(label);
+        sectionsHtml += `<figure>`;
+        sectionsHtml += `<a href="${hrefEsc}" target="_blank" rel="noopener"><img src="${hrefEsc}" alt="${labelEsc}" loading="lazy"></a>`;
+        sectionsHtml += `<figcaption><div class="label">${labelEsc}</div>`;
+        if (photo.source === "upload") {
+          sectionsHtml += `<div class="meta-line">Date taken: ${escapeHtml(fmtIso(photo.takenAt))}</div>`;
+          sectionsHtml += `<div class="meta-line">Location taken: ${escapeHtml(photo.gps ? formatGps(photo.gps) : "not in photo metadata")}</div>`;
+          sectionsHtml += `<div class="meta-line">Uploaded: ${escapeHtml(fmtIso(photo.uploadedAt))}</div>`;
+        } else {
+          const parts = [];
+          if (photo.takenAt) parts.push(new Date(photo.takenAt).toLocaleString());
+          if (photo.gps) parts.push(formatGps(photo.gps));
+          if (parts.length) sectionsHtml += `<div class="meta-line">${escapeHtml(parts.join("  ·  "))}</div>`;
+        }
+        sectionsHtml += `<a class="open-link" href="${hrefEsc}" target="_blank" rel="noopener">Open photo →</a>`;
+        sectionsHtml += `</figcaption></figure>`;
+      }
+      sectionsHtml += `</div></section>`;
+    }
+
+    const css = `
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#f4f5f4;color:#13241d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:15px;line-height:1.45}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+header.cover{background:#0b3d2e;color:#fff;padding:18px 20px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
+header.cover h1{margin:0 0 8px;font-size:1.35rem}
+.cover dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:6px 0 0;font-size:0.9rem}
+.cover dt{font-weight:600;opacity:0.85}
+.cover dd{margin:0}
+.toc,section.group{background:#fff;border:1px solid #dde3e0;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+.toc h2,section.group h2{margin:0 0 10px;font-size:1.1rem}
+.toc ul{list-style:none;padding:0;margin:0}
+.toc li{padding:3px 0}
+.toc .toc-section{font-weight:700;margin-top:6px}
+.toc .toc-section-name{display:inline-block;margin-bottom:4px}
+.toc .toc-section > ul{margin:4px 0 6px;padding-left:14px;font-weight:normal}
+.toc a{color:#1652b2;text-decoration:underline}
+.toc .count{color:#5b6b65;font-size:0.85rem;margin-left:6px}
+.total{margin:10px 0 0;font-weight:700;font-size:0.95rem;color:#0b3d2e}
+.photos{display:grid;grid-template-columns:1fr;gap:16px}
+@media (min-width:720px){.photos{grid-template-columns:1fr 1fr}}
+figure{margin:0;border:1px solid #eef3f0;border-radius:10px;overflow:hidden;background:#fff;display:flex;flex-direction:column}
+figure img{display:block;width:100%;height:auto;background:#000}
+figcaption{padding:10px 12px;font-size:0.88rem}
+.label{font-weight:600;margin-bottom:4px}
+.meta-line{color:#5b6b65;font-size:0.82rem;margin:2px 0}
+.open-link{display:inline-block;margin-top:6px;color:#1652b2;text-decoration:underline;font-size:0.82rem}
+`;
+
+    const title = state.property.name || meta.address || "Photo Evidence";
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)} — Photo Evidence</title>
+<style>${css}</style>
+</head>
+<body>
+<div class="wrap">
+<header class="cover">
+<h1>${escapeHtml(title)}</h1>
+<dl>
+<dt>Assessor</dt><dd>${escapeHtml(meta.assessor || "—")}</dd>
+<dt>Property</dt><dd>${escapeHtml(meta.address || "—")}</dd>
+<dt>Job ref</dt><dd>${escapeHtml(meta.ref || "—")}</dd>
+<dt>Date</dt><dd>${escapeHtml(meta.date || "—")}</dd>
+<dt>Generated</dt><dd>${escapeHtml(new Date().toLocaleString())}</dd>
+</dl>
+</header>
+<nav class="toc"><h2>Contents</h2>${tocHtml}<p class="total">Total photos: ${totalPhotos}</p></nav>
+<main>${sectionsHtml}</main>
+</div>
+</body>
+</html>`;
+  }
+
   async function exportPhotosAsZip() {
     if (typeof JSZip === "undefined") {
       toast("ZIP library failed to load.", "err");
@@ -1817,8 +1949,12 @@
     try {
       toast("Building photos ZIP…");
       const zip = new JSZip();
+
+      // First pass: drop every photo into its folder and record the
+      // archive-relative path so the PDF and HTML index can link back to it.
       const dirForGroup = new Map(); // group.id -> dir
       const dirTaken = new Map(); // dir -> count
+      const photoPaths = new Map(); // photo.id -> "dir/name.jpg"
       for (const { photo, group, index, bytes, stamp } of items) {
         let dir = dirForGroup.get(group.id);
         if (!dir) {
@@ -1835,7 +1971,28 @@
         const labelSlug = slugify(photo.label || `${group.name}-${index}`);
         const name = `${String(index).padStart(2, "0")}_${labelSlug}.jpg`;
         folder.file(name, bytes, { date: new Date(stamp) });
+        photoPaths.set(photo.id, `${dir}/${name}`);
       }
+
+      // PDF alongside the photos, with the embedded JPEGs hyperlinked to
+      // the corresponding full-resolution files in the archive.
+      try {
+        const { doc, filename: pdfName } = await buildPdf({ photoPaths });
+        zip.file(pdfName, doc.output("blob"));
+      } catch (err) {
+        console.warn("PDF generation failed; ZIP will ship without it.", err);
+        toast("PDF couldn't be generated — ZIP includes HTML only.", "err");
+      }
+
+      // Lightweight HTML index that references the same photo files by
+      // relative path. Open index.html after extracting to browse the
+      // report in any browser without needing the PDF reader.
+      try {
+        zip.file("index.html", buildHtmlIndex(photoPaths));
+      } catch (err) {
+        console.warn("HTML index generation failed.", err);
+      }
+
       const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
       saveBlob(zipBlob, `${reportBaseName()}_photos.zip`);
       toast("Photos ZIP saved.");
