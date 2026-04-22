@@ -29,8 +29,16 @@
   const MAIN_SECTION = "Main Property";
   const EXTENSION_PREFIX = "Extension ";
   const MAX_EXTENSIONS = 4;
-  const MAX_DIMENSION = 2000;
-  const JPEG_QUALITY = 0.88;
+  // Storage / export quality: keep individual exported images at near-original
+  // fidelity. Camera captures are re-encoded once when the date/GPS overlay is
+  // burned in; uploads keep their original bytes unless they exceed the ceiling.
+  const MAX_DIMENSION = 5000;
+  const JPEG_QUALITY = 1.0;
+  // PDF embedding: re-encode each image at a smaller dimension and lower
+  // quality so the report PDF stays compact (compress: true is also set on
+  // the jsPDF doc itself).
+  const PDF_MAX_DIMENSION = 1400;
+  const PDF_JPEG_QUALITY = 0.6;
 
   // -------------------- IndexedDB --------------------
   const IDB = (() => {
@@ -300,6 +308,34 @@
       };
       img.src = url;
     });
+  }
+
+  function loadImageFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      img.src = dataUrl;
+    });
+  }
+
+  async function reencodeForPdf(dataUrl) {
+    try {
+      const img = await loadImageFromDataUrl(dataUrl);
+      const longest = Math.max(img.naturalWidth, img.naturalHeight);
+      const scale = longest > PDF_MAX_DIMENSION ? PDF_MAX_DIMENSION / longest : 1;
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      return canvas.toDataURL("image/jpeg", PDF_JPEG_QUALITY);
+    } catch (err) {
+      console.warn("PDF re-encode failed; embedding original.", err);
+      return dataUrl;
+    }
   }
 
   function roundRect(ctx, x, y, w, h, r) {
@@ -1474,7 +1510,11 @@
 
         const x = margin + (maxImgW - drawW) / 2;
         try {
-          doc.addImage(photo.dataUrl, "JPEG", x, cursorY, drawW, drawH, undefined, "FAST");
+          // Re-encode to a smaller / lower-quality JPEG just for PDF
+          // embedding so the report stays compact, while the stored image
+          // we use for ZIP / share exports keeps full fidelity.
+          const pdfDataUrl = await reencodeForPdf(photo.dataUrl);
+          doc.addImage(pdfDataUrl, "JPEG", x, cursorY, drawW, drawH, undefined, "FAST");
         } catch (err) {
           console.error("addImage failed", err);
           continue;
