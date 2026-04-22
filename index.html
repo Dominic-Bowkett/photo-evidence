@@ -26,6 +26,7 @@
           <span class="dot" id="gps-dot"></span>
           <span id="gps-label">Enable GPS</span>
         </button>
+        <button id="btn-export-photos" class="btn" type="button" disabled>Export photos</button>
         <button id="btn-export-zip" class="btn" type="button" disabled>Download ZIP</button>
         <button id="btn-export" class="btn btn-primary" type="button" disabled>Download PDF</button>
       </div>
@@ -121,6 +122,29 @@
     </template>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="export-photos-dialog" class="dialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="export-photos-title">
+      <div class="dialog-backdrop" id="export-photos-backdrop"></div>
+      <div class="dialog-card">
+        <h2 id="export-photos-title">Export photos</h2>
+        <p>
+          Choose how to export the photos from this property. Date and GPS
+          metadata are preserved in both options — stamped camera captures and
+          uploaded photos both retain their EXIF data.
+        </p>
+        <div class="dialog-actions">
+          <button class="btn btn-primary" id="export-photos-share" type="button">Save to Photos</button>
+          <button class="btn" id="export-photos-zip" type="button">Download ZIP</button>
+        </div>
+        <p class="dialog-help" id="export-photos-help">
+          <strong>Save to Photos</strong> opens your device's share sheet — tap
+          <em>Save Image</em> (iOS) or <em>Save to Gallery</em> (Android) to copy
+          the batch to your camera roll. <strong>Download ZIP</strong> saves a
+          single archive of all photos, grouped into folders.
+        </p>
+        <button class="btn btn-ghost-dark" id="export-photos-cancel" type="button">Cancel</button>
+      </div>
+    </div>
 
     <div id="camera-overlay" class="camera-overlay" hidden aria-hidden="true">
       <video id="camera-video" autoplay playsinline muted></video>

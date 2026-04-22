@@ -150,6 +150,13 @@
     gpsLabel: document.getElementById("gps-label"),
     exportBtn: document.getElementById("btn-export"),
     exportZipBtn: document.getElementById("btn-export-zip"),
+    exportPhotosBtn: document.getElementById("btn-export-photos"),
+    exportPhotosDialog: document.getElementById("export-photos-dialog"),
+    exportPhotosBackdrop: document.getElementById("export-photos-backdrop"),
+    exportPhotosShareBtn: document.getElementById("export-photos-share"),
+    exportPhotosZipBtn: document.getElementById("export-photos-zip"),
+    exportPhotosCancelBtn: document.getElementById("export-photos-cancel"),
+    exportPhotosHelp: document.getElementById("export-photos-help"),
     toast: document.getElementById("toast"),
     propSelect: document.getElementById("property-select"),
     newPropBtn: document.getElementById("btn-new-property"),
@@ -1063,6 +1070,7 @@
     const disabled = !state.property || !state.property.groups.some((g) => g.photoIds.length > 0);
     els.exportBtn.disabled = disabled;
     els.exportZipBtn.disabled = disabled;
+    els.exportPhotosBtn.disabled = disabled;
   }
 
   // -------------------- In-app camera --------------------
@@ -1713,6 +1721,150 @@
     }
   }
 
+  // -------------------- Export photos (share or photos-only ZIP) --------------------
+  function photoExportItems() {
+    const items = [];
+    for (const g of state.property.groups) {
+      if (!g.photoIds.length) continue;
+      let index = 0;
+      for (const pid of g.photoIds) {
+        const photo = state.photos.get(pid);
+        if (!photo) continue;
+        index += 1;
+        const dataUrl =
+          photo.source === "upload" ? photo.dataUrl : buildExifDataUrl(photo);
+        const bytes = dataUrlToBytes(dataUrl);
+        const stamp = photo.takenAt || photo.uploadedAt || new Date().toISOString();
+        items.push({ photo, group: g, index, bytes, stamp });
+      }
+    }
+    return items;
+  }
+
+  function photosSupportShare(files) {
+    try {
+      return (
+        typeof navigator !== "undefined" &&
+        typeof navigator.canShare === "function" &&
+        typeof navigator.share === "function" &&
+        typeof File === "function" &&
+        files.length > 0 &&
+        navigator.canShare({ files })
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function openExportPhotosDialog() {
+    els.exportPhotosDialog.hidden = false;
+    els.exportPhotosDialog.setAttribute("aria-hidden", "false");
+    // Adjust the share button to reflect support so users aren't misled.
+    const probeFile = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "probe.jpg", {
+      type: "image/jpeg",
+    });
+    const canShare =
+      typeof navigator !== "undefined" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [probeFile] });
+    els.exportPhotosShareBtn.disabled = !canShare;
+    els.exportPhotosShareBtn.title = canShare
+      ? ""
+      : "Your browser can't share files — try the ZIP option.";
+    if (!canShare) {
+      els.exportPhotosHelp.innerHTML =
+        "Your browser doesn't support sharing files to Photos. <strong>Download ZIP</strong> saves a single archive of all photos, grouped into folders.";
+    }
+  }
+
+  function closeExportPhotosDialog() {
+    els.exportPhotosDialog.hidden = true;
+    els.exportPhotosDialog.setAttribute("aria-hidden", "true");
+  }
+
+  function exportPhotosShareNow() {
+    // Called synchronously from a user click so navigator.share retains its
+    // user-gesture credit on iOS / Android.
+    const items = photoExportItems();
+    if (!items.length) {
+      toast("No photos to export.", "err");
+      return;
+    }
+    const files = items.map(({ photo, group, index, bytes, stamp }) => {
+      const d = new Date(stamp);
+      const pad = (n) => String(n).padStart(2, "0");
+      const dateStr =
+        `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_` +
+        `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+      const filename = `${slugify(group.name)}_${dateStr}_${String(index).padStart(2, "0")}.jpg`;
+      return new File([new Blob([bytes], { type: "image/jpeg" })], filename, {
+        type: "image/jpeg",
+        lastModified: d.getTime(),
+      });
+    });
+    if (!photosSupportShare(files)) {
+      toast("This browser can't share these files — try Download ZIP.", "err");
+      return;
+    }
+    const payload = {
+      files,
+      title: `${state.property.name || "Property"} — Photo evidence`,
+      text: "Photo evidence",
+    };
+    navigator
+      .share(payload)
+      .then(() => {
+        toast("Shared — tap Save Image / Save to Gallery in the sheet to back up.");
+      })
+      .catch((err) => {
+        if (err && err.name !== "AbortError") {
+          console.warn("Share failed", err);
+          toast("Share failed — use Download ZIP instead.", "err");
+        }
+      });
+  }
+
+  async function exportPhotosAsZip() {
+    if (typeof JSZip === "undefined") {
+      toast("ZIP library failed to load.", "err");
+      return;
+    }
+    const items = photoExportItems();
+    if (!items.length) {
+      toast("No photos to export.", "err");
+      return;
+    }
+    try {
+      toast("Building photos ZIP…");
+      const zip = new JSZip();
+      const dirForGroup = new Map(); // group.id -> dir
+      const dirTaken = new Map(); // dir -> count
+      for (const { photo, group, index, bytes, stamp } of items) {
+        let dir = dirForGroup.get(group.id);
+        if (!dir) {
+          const parts = [];
+          if (group.section) parts.push(slugify(group.section));
+          parts.push(slugify(group.name));
+          dir = parts.join("/");
+          const n = (dirTaken.get(dir) || 0) + 1;
+          dirTaken.set(dir, n);
+          if (n > 1) dir = `${dir}-${n}`;
+          dirForGroup.set(group.id, dir);
+        }
+        const folder = zip.folder(dir);
+        const labelSlug = slugify(photo.label || `${group.name}-${index}`);
+        const name = `${String(index).padStart(2, "0")}_${labelSlug}.jpg`;
+        folder.file(name, bytes, { date: new Date(stamp) });
+      }
+      const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+      saveBlob(zipBlob, `${reportBaseName()}_photos.zip`);
+      toast("Photos ZIP saved.");
+    } catch (err) {
+      console.error(err);
+      toast(err.message || "Failed to build photos ZIP.", "err");
+    }
+  }
+
   // -------------------- Wiring --------------------
   function wireMetaInputs() {
     const nameHandler = () => {
@@ -1770,6 +1922,28 @@
 
   els.exportZipBtn.addEventListener("click", () => {
     exportZip();
+  });
+
+  els.exportPhotosBtn.addEventListener("click", () => {
+    if (els.exportPhotosBtn.disabled) return;
+    openExportPhotosDialog();
+  });
+  els.exportPhotosCancelBtn.addEventListener("click", closeExportPhotosDialog);
+  els.exportPhotosBackdrop.addEventListener("click", closeExportPhotosDialog);
+  els.exportPhotosShareBtn.addEventListener("click", () => {
+    // Keep synchronous up to navigator.share() so iOS grants the gesture.
+    closeExportPhotosDialog();
+    exportPhotosShareNow();
+  });
+  els.exportPhotosZipBtn.addEventListener("click", () => {
+    closeExportPhotosDialog();
+    exportPhotosAsZip();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!els.exportPhotosDialog.hidden && e.key === "Escape") {
+      e.preventDefault();
+      closeExportPhotosDialog();
+    }
   });
 
   els.propSelect.addEventListener("change", () => {
